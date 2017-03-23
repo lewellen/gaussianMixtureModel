@@ -130,7 +130,6 @@ void solvePositiveSemidefinite(double* B, int numPoints, struct GMM* gmm, int mi
 	// Found that sequential access improved runtime.
 	double* LF = (double*)malloc(N * N * sizeof(double));
 	for (int i = 0, lf = 0; i < N; i++) {
-		double sum = 0;
 		for (int j = 0; j <= i - 1; j++)
 			LF[lf++] = L[i * N + j];
 
@@ -139,7 +138,6 @@ void solvePositiveSemidefinite(double* B, int numPoints, struct GMM* gmm, int mi
 
 	double* LB = (double*)malloc(N*N*sizeof(double));
 	for (int i = N - 1, lb = 0; i >= 0; i--) {
-		double sum = 0;
 		for (int j = i + 1; j < N; j++)
 			LB[lb++] = L[j * N + i];
 

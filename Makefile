@@ -29,8 +29,8 @@ obj/%.dat: bin/% | obj
 
 
 
-bin/%: obj/src/%.o | bin
-	$(ccTool) $(ccFlaggs) $< -o $@ $(ccLibs) 
+bin/%: obj/src/%.o obj/lib.o | bin
+	$(ccTool) $(ccFlaggs) $< obj/lib.o -o $@ $(ccLibs) 
 
 bin:
 	mkdir -p ./bin
@@ -41,7 +41,7 @@ obj/lib.o: $(libObjs)
 obj/src/%.o: src/%.c | obj/src
 	$(ccTool) $(ccFlags) -I./include -c $< -o $@ $(ccLibs) 
 
-obj/lib/%.o: lib/%.cc | obj/lib
+obj/lib/%.o: lib/%.c | obj/lib
 	$(ccTool) $(ccFlags) -I./include -c $< -o $@ $(ccLibs)
  
 obj/src: | obj

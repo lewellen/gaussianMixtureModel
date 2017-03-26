@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,16 +13,26 @@
 #endif
 
 struct GMM* initGMM(double* X, size_t numPoints, size_t numMixtures, size_t pointDim) {
+	assert(X != NULL);
+	assert(numPoints > 0);
+	assert(numMixtures > 0);
+	assert(pointDim > 0);
+
+	// X is an numPoints x pointDim set of training data
+
 	struct GMM* gmm = (struct GMM*)checkedCalloc(1, sizeof(struct GMM));
 	gmm->pointDim = pointDim;
 	gmm->numMixtures = numMixtures;
 
 	// Initial guesses
+
+	// Assume every mixture has uniform weight
 	double uniformTau = 1.0 / numMixtures;
 	gmm->tau = (double*)checkedCalloc(numMixtures, sizeof(double));
 	for (size_t mixture = 0; mixture < numMixtures; ++mixture)
 		gmm->tau[mixture] = uniformTau;
 
+	// Use a random point for mean of each mixture
 	gmm->mu = (double*)checkedCalloc(numMixtures * pointDim, sizeof(double));
 	for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
 		size_t j = rand() % numPoints;
@@ -29,6 +40,7 @@ struct GMM* initGMM(double* X, size_t numPoints, size_t numMixtures, size_t poin
 			gmm->mu[mixture * pointDim + dim] = X[j * pointDim + dim];
 	}
 
+	// Use identity covariance- assume dimensions are independent
 	gmm->sigma = (double*)checkedCalloc(numMixtures * pointDim * pointDim, sizeof(double));
 	for (size_t mixture = 0; mixture < numMixtures; ++mixture)
 		for (size_t j = 0; j < pointDim; ++j)
@@ -37,24 +49,30 @@ struct GMM* initGMM(double* X, size_t numPoints, size_t numMixtures, size_t poin
 	gmm->sigmaL = (double*)checkedCalloc(numMixtures * pointDim * pointDim, sizeof(double));
 	gmm->normalizer = (double*)checkedCalloc(numMixtures, sizeof(double));
 
-	prepareCholesky(gmm);
+	prepareCovariances(gmm);
 
 	return gmm;
 }
 
-void prepareCholesky(struct GMM* gmm) {
+void prepareCovariances(struct GMM* gmm) {
 	size_t blockSize = gmm->pointDim * gmm->pointDim;
 
 	// Perform cholesky factorization once each iteration instead of 
 	// repeadily for each normDist execution.
-	for (size_t mixture = 0; mixture < gmm->numMixtures; ++mixture)
-		choleskyDecomposition(&(gmm->sigma[mixture * blockSize]), &(gmm->sigmaL[mixture * blockSize]), gmm->pointDim);
+	for (size_t mixture = 0; mixture < gmm->numMixtures; ++mixture) {
+		choleskyDecomposition(
+			&(gmm->sigma[mixture * blockSize]), 
+			gmm->pointDim, 
+			&(gmm->sigmaL[mixture * blockSize])
+		);
+	}
 
 	// det(Sigma) = det(L L^T) = det(L)^2
 	for (size_t mixture = 0; mixture < gmm->numMixtures; ++mixture) {
 		double det = 1.0;
-		for (size_t i = 0; i < gmm->pointDim; ++i)
+		for (size_t i = 0; i < gmm->pointDim; ++i) {
 			det *= gmm->sigmaL[mixture * blockSize + i * gmm->pointDim + i];
+		}
 
 		det *= det;
 
@@ -79,38 +97,58 @@ void mvNormDist(double* X, size_t numPoints, struct GMM* gmm, size_t mixture, do
 	// Found this gave 1.36x improvement (~6ms -> ~4ms) on the Old Faithful 
 	// dataset. Total 1.77x improvement.
 
+	// Here we are computing the probability density function of the  multivariate
+	// normal distribution conditioned on a single mixture for the set of points 
+	// given by X.
+	//
+	// P(x|mixture) = exp{ -0.5 * (x - mu)^T Sigma^{-} (x - mu) } / sqrt{ (2pi)^k det(Sigma) }
+	//
+	// Where Sigma and Mu are really Sigma_{mixture} Mu_{mixture}
+
+	assert(X != NULL);
+	assert(numPoints > 0);
+	assert(gmm != NULL);
+	assert(P != NULL);
+
 	double* XM = (double*)malloc(numPoints * gmm->pointDim * sizeof(double));
 	double* SXM = (double*)malloc(numPoints * gmm->pointDim * sizeof(double));
 	double* innerProduct = (double*)malloc(numPoints * sizeof(double));
 
 	double* mu = &(gmm->mu[mixture * gmm->pointDim]);
+	double* sigmaL = &(gmm->sigmaL[mixture * gmm->pointDim * gmm->pointDim]);
 
-	// O(N)
-	// (x - m)
+	// Let XM = (x - m)
 	for (size_t point = 0; point < numPoints; ++point)
 		for (size_t dim = 0; dim < gmm->pointDim; ++dim)
 			XM[point * gmm->pointDim + dim] = X[point * gmm->pointDim + dim] - mu[dim];
 
-	// --> O(N^2) <--
-	// S y = (x - m)
-	solvePositiveSemidefinite(XM, numPoints, & gmm->sigmaL[gmm->pointDim * gmm->pointDim * mixture], gmm->pointDim, SXM);
+	// Sigma SXM = XM => Sigma^{-} XM = SXM
+	solvePositiveSemidefinite(
+		sigmaL, 
+		XM, 
+		SXM,
+		gmm->pointDim, 
+		numPoints 
+		);
 
-	// O(N)
-	// (x - m)^T y
+	// XM^T SXM
 	for (size_t point = 0; point < numPoints; ++point) {
 		innerProduct[point] = 0.0;
-		for (size_t dim = 0; dim < gmm->pointDim; ++dim)
+		for (size_t dim = 0; dim < gmm->pointDim; ++dim) {
 			innerProduct[point] += XM[point * gmm->pointDim + dim] * SXM[point * gmm->pointDim + dim];
+		}
 	}
 
-	// O(1)
+	// Compute P exp( -0.5 innerProduct ) / normalizer
 	for (size_t point = 0; point < numPoints; ++point) {
 		P[point] = exp(-0.5 * innerProduct[point]) / gmm->normalizer[mixture];
-		if (P[point] < 1e-8)
+		if (P[point] < 1e-8) {
 			P[point] = 0.0;
+		}
 
-		if (1.0 - P[point] < 1e-8)
+		if (1.0 - P[point] < 1e-8) {
 			P[point] = 1.0;
+		}
 	}
 
 	free(XM);
@@ -132,7 +170,7 @@ double logLikelihood(double* prob, size_t numPoints, struct GMM* gmm) {
 }
 
 struct GMM* fit(double* X, size_t numPoints, size_t pointDim, size_t numMixtures) {
-	struct GMM* gmm = initGMM(X, numPoints, pointDim, numMixtures);
+	struct GMM* gmm = initGMM(X, numPoints, numMixtures, pointDim);
 
 	size_t maxIterations = 100;
 	double tolerance = 1e-8;
@@ -219,7 +257,7 @@ struct GMM* fit(double* X, size_t numPoints, size_t pointDim, size_t numMixtures
 				gmm->sigma[mixture * pointDim * pointDim + i] /= margin[mixture];
 		}
 
-		prepareCholesky(gmm);
+		prepareCovariances(gmm);
 
 	} while (1 == 1);
 

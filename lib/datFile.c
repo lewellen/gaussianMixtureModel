@@ -28,7 +28,7 @@ char* loadFile(const char* filePath, size_t* outFileLength) {
 	if(handle == NULL) {
 		perror(filePath);
 	} else {
-		if( getFileLength(handle, outFileLength) != 0 ) {
+		if(getFileLength(handle, outFileLength)) {
 			contents = (char*)checkedCalloc(*outFileLength + 1, sizeof(char));
 			assert(contents != NULL);
 
@@ -112,6 +112,10 @@ double* parseDatFile(const char* filePath, size_t* numPoints, size_t* pointDim) 
 
 	size_t fileLength = 0;
 	char* contents = loadFile(filePath, &fileLength);
+	if(contents == NULL) {
+		return NULL;
+	}
+
 	if(!isValidDatFile(contents, fileLength, numPoints, pointDim)) {
 		free(contents);
 		contents = NULL;

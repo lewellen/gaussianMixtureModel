@@ -28,7 +28,7 @@ struct GMM {
 
 struct GMM* initGMM(double* X, size_t numPoints, size_t numMixtures, size_t pointDim); 
 
-void prepareCholesky(struct GMM* gmm); 
+void prepareCovariances(struct GMM* gmm); 
 
 void freeGMM(struct GMM* gmm);
 

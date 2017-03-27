@@ -12,11 +12,150 @@
 #define PI 3.141592653589793238
 #endif
 
-struct GMM* initGMM(double* X, size_t numPoints, size_t numMixtures, size_t pointDim) {
+struct GMM* fit(
+	const double* X, 
+	const size_t numPoints, 
+	const size_t pointDim, 
+	const size_t numMixtures
+) {
 	assert(X != NULL);
 	assert(numPoints > 0);
-	assert(numMixtures > 0);
 	assert(pointDim > 0);
+	assert(numMixtures > 0);
+	
+	struct GMM* gmm = initGMM(X, numPoints, pointDim, numMixtures);
+
+	const double tolerance = 1e-8;
+	size_t maxIterations = 100;
+	double prevLogL = -INFINITY;
+	double currentLogL = -INFINITY;
+
+	double* prob = (double*)checkedCalloc(numPoints * numMixtures, sizeof(double));
+	double* margin = (double*)checkedCalloc(numMixtures, sizeof(double));
+
+	double* xm = (double*)checkedCalloc(pointDim, sizeof(double));
+	double* outerProduct = (double*)checkedCalloc(pointDim * pointDim, sizeof(double));
+
+	do {
+		// --- E-Step ---
+
+		// Compute T
+		for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
+			mvNormDist(
+				gmm, mixture, 
+				X, numPoints, 
+				&(prob[mixture * numPoints])
+			);
+		}
+
+		for (size_t point = 0; point < numPoints; ++point) {
+			double sum = 0.0;
+			for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
+				sum += prob[mixture * numPoints + point];
+			}
+
+			if (sum > tolerance) {
+				for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
+					prob[numPoints * mixture + point] /= sum;
+				}
+			}
+		}
+
+		// 2015-09-20 GEL Eliminated redundant mvNorm clac in logLikelihood by 
+		// passing in precomputed prob values. Also moved loop termination here
+		// since likelihood determines termination. Result: 1.3x improvement in 
+		// execution time.  (~8 ms to ~6 ms on oldFaithful.dat)
+		prevLogL = currentLogL;
+		currentLogL = logLikelihood(gmm, prob, numPoints);
+		if (--maxIterations == 0 || !(maxIterations < 80 ? currentLogL > prevLogL : 1 == 1)) {
+			break;
+		}
+
+		// Let U[mixture] = \Sum_i T[mixture, i]
+		memset(margin, 0, numMixtures * sizeof(double));
+		for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
+			for (size_t point = 0; point < numPoints; ++point) {
+				margin[mixture] += prob[mixture * numPoints + point];
+			}
+		}
+
+		double normTerm = 0;
+		for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
+			normTerm += margin[mixture];
+		}
+
+		// --- M-Step ---
+
+		// Update tau
+		for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
+			gmm->tau[mixture] = margin[mixture] / normTerm;
+		}
+
+		// Update mu
+		memset(gmm->mu, 0, numMixtures * pointDim * sizeof(double));
+		for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
+			for (size_t point = 0; point < numPoints; ++point) {
+				for (size_t dim = 0; dim < pointDim; ++dim) {
+					gmm->mu[mixture * pointDim + dim] += prob[mixture * numPoints + point] * X[point * pointDim + dim];
+				}
+			}
+		}
+
+		for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
+			for (size_t dim = 0; dim < pointDim; ++dim) {
+				gmm->mu[mixture * pointDim + dim] /= margin[mixture];
+			}
+		}
+
+		// Update sigma
+		memset(gmm->sigma, 0, numMixtures * pointDim * pointDim * sizeof(double));
+		for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
+			for (size_t point = 0; point < numPoints; ++point) {
+				// (x - m)
+				for (size_t dim = 0; dim < pointDim; ++dim) {
+					xm[dim] = X[point * pointDim + dim] - gmm->mu[mixture * pointDim + dim];
+				}
+
+				// (x - m) (x - m)^T
+				for (size_t row = 0; row < pointDim; ++row) {
+					for (size_t column = 0; column < pointDim; ++column) {
+						outerProduct[row * pointDim + column] = xm[row] * xm[column];
+					}
+				}
+
+				for (size_t i = 0; i < pointDim * pointDim; ++i) {
+					gmm->sigma[mixture * pointDim * pointDim + i] += prob[mixture * numPoints + point] * outerProduct[i];
+				}
+			}
+
+			for (size_t i = 0; i < pointDim * pointDim; ++i) {
+				gmm->sigma[mixture * pointDim * pointDim + i] /= margin[mixture];
+			}
+		}
+
+		prepareCovariances(gmm);
+
+	} while (1 == 1);
+
+	free(prob);
+	free(margin);
+
+	free(xm);
+	free(outerProduct);
+
+	return gmm;
+}
+
+struct GMM* initGMM(
+	const double* X, 
+	const size_t numPoints, 
+	const size_t pointDim, 
+	const size_t numMixtures
+) {
+	assert(X != NULL);
+	assert(numPoints > 0);
+	assert(pointDim > 0);
+	assert(numMixtures > 0);
 
 	// X is an numPoints x pointDim set of training data
 
@@ -54,7 +193,20 @@ struct GMM* initGMM(double* X, size_t numPoints, size_t numMixtures, size_t poin
 	return gmm;
 }
 
+void freeGMM(struct GMM* gmm) {
+	assert(gmm != NULL);
+
+	free(gmm->tau);
+	free(gmm->mu);
+	free(gmm->sigma);
+	free(gmm->sigmaL);
+	free(gmm->normalizer);
+	free(gmm);
+}
+
 void prepareCovariances(struct GMM* gmm) {
+	assert(gmm != NULL);
+
 	size_t blockSize = gmm->pointDim * gmm->pointDim;
 
 	// Perform cholesky factorization once each iteration instead of 
@@ -80,17 +232,11 @@ void prepareCovariances(struct GMM* gmm) {
 	}
 }
 
-void freeGMM(struct GMM* gmm) {
-	free(gmm->tau);
-	free(gmm->mu);
-	free(gmm->sigma);
-	free(gmm->sigmaL);
-	free(gmm->normalizer);
-	free(gmm);
-}
-
-
-void mvNormDist(double* X, size_t numPoints, struct GMM* gmm, size_t mixture, double* P) {
+void mvNormDist(
+	const struct GMM* gmm, const size_t mixture, 
+	const double* X, const size_t numPoints, 
+	double* P
+) {
 	// 2015-09-23 GEL Through profiling (Sleepy CS), found that program was 
 	// spending most of its time in this method. Decided to change from 
 	// processing single point at a time to processing set of points at a time. 
@@ -105,9 +251,9 @@ void mvNormDist(double* X, size_t numPoints, struct GMM* gmm, size_t mixture, do
 	//
 	// Where Sigma and Mu are really Sigma_{mixture} Mu_{mixture}
 
+	assert(gmm != NULL);
 	assert(X != NULL);
 	assert(numPoints > 0);
-	assert(gmm != NULL);
 	assert(P != NULL);
 
 	double* XM = (double*)malloc(numPoints * gmm->pointDim * sizeof(double));
@@ -156,7 +302,14 @@ void mvNormDist(double* X, size_t numPoints, struct GMM* gmm, size_t mixture, do
 	free(innerProduct);
 }
 
-double logLikelihood(double* prob, size_t numPoints, struct GMM* gmm) {
+double logLikelihood(
+	const struct GMM* gmm,
+	const double* prob, const size_t numPoints
+) { 
+	assert(gmm != NULL);
+	assert(prob != NULL);
+	assert(numPoints > 0);
+
 	double logL = 0.0;
 	for (size_t point = 0; point < numPoints; ++point) {
 		double inner = 0.0;
@@ -169,103 +322,3 @@ double logLikelihood(double* prob, size_t numPoints, struct GMM* gmm) {
 	return logL;
 }
 
-struct GMM* fit(double* X, size_t numPoints, size_t pointDim, size_t numMixtures) {
-	struct GMM* gmm = initGMM(X, numPoints, numMixtures, pointDim);
-
-	size_t maxIterations = 100;
-	double tolerance = 1e-8;
-	double prevLogL = -INFINITY;
-	double currentLogL = -INFINITY;
-
-	double* prob = (double*)checkedCalloc(numPoints * numMixtures, sizeof(double));
-	double* margin = (double*)checkedCalloc(numMixtures, sizeof(double));
-
-	double* xm = (double*)checkedCalloc(pointDim, sizeof(double));
-	double* outerProduct = (double*)checkedCalloc(pointDim * pointDim, sizeof(double));
-
-	do {
-		// --- E-Step ---
-
-		// Compute T
-		for (size_t mixture = 0; mixture < numMixtures; ++mixture)
-			mvNormDist(X, numPoints, gmm, mixture, &(prob[mixture * numPoints]));
-
-		for (size_t point = 0; point < numPoints; ++point) {
-			double sum = 0.0;
-			for (size_t mixture = 0; mixture < numMixtures; ++mixture)
-				sum += prob[mixture * numPoints + point];
-
-			if (sum > tolerance)
-				for (size_t mixture = 0; mixture < numMixtures; ++mixture)
-					prob[numPoints * mixture + point] /= sum;
-		}
-
-		// 2015-09-20 GEL Eliminated redundant mvNorm clac in logLikelihood by 
-		// passing in precomputed prob values. Also moved loop termination here
-		// since likelihood determines termination. Result: 1.3x improvement in 
-		// execution time.  (~8 ms to ~6 ms on oldFaithful.dat)
-		prevLogL = currentLogL;
-		currentLogL = logLikelihood(prob, numPoints, gmm);
-		if (--maxIterations == 0 || !(maxIterations < 80 ? currentLogL > prevLogL : 1 == 1))
-			break;
-
-		// Let U[mixture] = \Sum_i T[mixture, i]
-		memset(margin, 0, numMixtures * sizeof(double));
-		for (size_t mixture = 0; mixture < numMixtures; ++mixture)
-			for (size_t point = 0; point < numPoints; ++point)
-				margin[mixture] += prob[mixture * numPoints + point];
-
-		double normTerm = 0;
-		for (size_t mixture = 0; mixture < numMixtures; ++mixture)
-			normTerm += margin[mixture];
-
-		// --- M-Step ---
-
-		// Update tau
-		for (size_t mixture = 0; mixture < numMixtures; ++mixture)
-			gmm->tau[mixture] = margin[mixture] / normTerm;
-
-		// Update mu
-		memset(gmm->mu, 0, numMixtures * pointDim * sizeof(double));
-		for (size_t mixture = 0; mixture < numMixtures; ++mixture)
-			for (size_t point = 0; point < numPoints; ++point)
-				for (size_t dim = 0; dim < pointDim; ++dim)
-					gmm->mu[mixture * pointDim + dim] += prob[mixture * numPoints + point] * X[point * pointDim + dim];
-
-		for (size_t mixture = 0; mixture < numMixtures; ++mixture)
-			for (size_t dim = 0; dim < pointDim; ++dim)
-				gmm->mu[mixture * pointDim + dim] /= margin[mixture];
-
-		// Update sigma
-		memset(gmm->sigma, 0, numMixtures * pointDim * pointDim * sizeof(double));
-		for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
-			for (size_t point = 0; point < numPoints; ++point) {
-				// (x - m)
-				for (size_t dim = 0; dim < pointDim; ++dim)
-					xm[dim] = X[point * pointDim + dim] - gmm->mu[mixture * pointDim + dim];
-
-				// (x - m) (x - m)^T
-				for (size_t row = 0; row < pointDim; ++row)
-					for (size_t column = 0; column < pointDim; ++column)
-						outerProduct[row * pointDim + column] = xm[row] * xm[column];
-
-				for (size_t i = 0; i < pointDim * pointDim; ++i)
-					gmm->sigma[mixture * pointDim * pointDim + i] += prob[mixture * numPoints + point] * outerProduct[i];
-			}
-
-			for (size_t i = 0; i < pointDim * pointDim; ++i)
-				gmm->sigma[mixture * pointDim * pointDim + i] /= margin[mixture];
-		}
-
-		prepareCovariances(gmm);
-
-	} while (1 == 1);
-
-	free(prob);
-	free(margin);
-
-	free(xm);
-	free(outerProduct);
-
-	return gmm;
-}

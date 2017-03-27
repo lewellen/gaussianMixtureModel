@@ -3,6 +3,10 @@
 
 #include <stdlib.h>
 
+// There is an implict struct Component to all the GMM entries. Decided to leave
+// everything coalesced since those values are accessed sequentially rather than
+// by component throughout most of the code.
+
 struct GMM {
 	// Dimension of the data (each data point is a vector \in R^{pointDim})
 	size_t pointDim;
@@ -26,16 +30,33 @@ struct GMM {
 	double* normalizer;
 };
 
-struct GMM* initGMM(double* X, size_t numPoints, size_t numMixtures, size_t pointDim); 
+struct GMM* fit(
+	const double* X, 
+	const size_t numPoints, 
+	const size_t pointDim, 
+	const size_t numMixtures
+	);
+
+struct GMM* initGMM(
+	const double* X, 
+	const size_t numPoints, 
+	const size_t pointDim, 
+	const size_t numMixtures
+	); 
 
 void prepareCovariances(struct GMM* gmm); 
 
 void freeGMM(struct GMM* gmm);
 
-void mvNormDist(double* X, size_t numPoints, struct GMM* gmm, size_t mixture, double* P); 
+void mvNormDist(
+	const struct GMM* gmm, const size_t mixture, 
+	const double* X, const size_t numPoints, 
+	double* P
+); 
 
-double logLikelihood(double* prob, size_t numPoints, struct GMM* gmm); 
-
-struct GMM* fit(double* X, size_t numPoints, size_t pointDim, size_t numMixtures);
+double logLikelihood(
+	const struct GMM* gmm,
+	const double* prob, const size_t numPoints
+); 
  
 #endif

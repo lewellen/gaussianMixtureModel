@@ -5,7 +5,7 @@
 
 #include "util.h"
 
-void* checkedCalloc(size_t count, size_t size) {
+void* checkedCalloc(const size_t count, const size_t size) {
 	errno = 0;
 	void* result = calloc(count, size);
 	if (errno != 0 || result == NULL) {

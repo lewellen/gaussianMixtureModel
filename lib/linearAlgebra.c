@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <float.h>
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -6,7 +7,7 @@
 
 #include "linearAlgebra.h"
 
-void choleskyDecomposition(double* A, size_t pointDim, double* L) {
+void choleskyDecomposition(const double* A, const size_t pointDim, double* L) {
 	// p. 157-158., Cholesky Factorization, 4.2 LU and Cholesky Factorizations, 
 	// Numerical Analysis by Kincaid, Cheney.
 
@@ -22,7 +23,7 @@ void choleskyDecomposition(double* A, size_t pointDim, double* L) {
 			}
 
 			double b = A[j * pointDim + i];
-			if(a != b) {
+			if(fabs(a-b) > DBL_EPSILON) {
 				fprintf(stdout, "A[%zu, %zu] should be symmetric (%f != %f)\n", i, j, a, b);
 				assert(0);
 			}
@@ -96,7 +97,7 @@ void solvePositiveSemidefinite(const double* L, const double* B, double* X, cons
 	// Use forward subsitution to solve lower triangular matrix system Lz = b.
 	// p. 150., Easy-to-Solve Systems, 4.2 LU and Cholesky Factorizations, Numerical Analysis by Kincaid, Cheney.
 	for (size_t point = 0; point < numPoints; ++point) {
-		double* b = &(B[point * pointDim]);
+		const double* b = &(B[point * pointDim]);
 		double* z = &(Z[point * pointDim]);
 
 		for (size_t i = 0, lf = 0; i < pointDim; i++) {

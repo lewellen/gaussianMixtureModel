@@ -34,8 +34,8 @@ int main(int argc, char** argv) {
 		return EXIT_FAILURE;
 	}
 
-	size_t numMixtures;
-	if(!strToPositiveInteger(argv[2], &numMixtures)) {
+	size_t numComponents;
+	if(!strToPositiveInteger(argv[2], &numComponents)) {
 		fprintf(stdout, "Expected numComponents to be a positive integer.\n");
 		usage(argv[0]);
 		return EXIT_FAILURE;
@@ -47,28 +47,30 @@ int main(int argc, char** argv) {
 		return EXIT_FAILURE;
 	}
 
-	if(numPoints < numMixtures) {
-		fprintf(stdout, "Number of mixtures should be less than or equal to number of points.\n");
+	if(numPoints < numComponents) {
+		fprintf(stdout, "Number of components should be less than or equal to number of points.\n");
 		free(data);
 		return EXIT_FAILURE;
 	}
 
-	struct GMM* gmm = fit(data, numPoints, pointDim, numMixtures);
+	struct GMM* gmm = fit(data, numPoints, pointDim, numComponents);
 
 	fprintf(stdout, "numPoints: %zu, pointDim: %zu\n", numPoints, pointDim);
-	fprintf(stdout, "numMixtures: %zu\n", numMixtures);
-	for (size_t mixture = 0; mixture < gmm->numMixtures; ++mixture) {
-		fprintf(stdout, "Mixture %zu:\n", mixture);
+	fprintf(stdout, "numComponents: %zu\n", numComponents);
+	for (size_t k = 0; k < gmm->numComponents; ++k) {
+		struct Component* component = & gmm->components[k];
 
-		fprintf(stdout, "\ttau: %.3f\n", gmm->tau[mixture]);
+		fprintf(stdout, "Mixture %zu:\n", k);
+
+		fprintf(stdout, "\tpi: %.3f\n", component->pi);
 
 		fprintf(stdout, "\tmu: ");
 		for (size_t dim = 0; dim < gmm->pointDim; ++dim)
-			fprintf(stdout, "%.2f ", gmm->mu[mixture * pointDim + dim]);
+			fprintf(stdout, "%.3f ", component->mu[dim]);
 
 		fprintf(stdout, "\n\tsigma: ");
 		for (size_t dim = 0; dim < gmm->pointDim * gmm->pointDim; ++dim)
-			fprintf(stdout, "%.2f ", gmm->sigma[mixture * gmm->pointDim * gmm->pointDim + dim]);
+			fprintf(stdout, "%.3f ", component->sigma[dim]);
 
 		fprintf(stdout, "\n\n");
 	}

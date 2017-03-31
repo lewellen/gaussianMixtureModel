@@ -64,11 +64,11 @@ int main(int argc, char** argv) {
 
 		fprintf(stdout, "\tmu: ");
 		for (size_t dim = 0; dim < gmm->pointDim; ++dim)
-			fprintf(stdout, "%.2f ", gmm->mu[mixture * pointDim + dim]);
+			fprintf(stdout, "%.3f ", gmm->mu[mixture * pointDim + dim]);
 
 		fprintf(stdout, "\n\tsigma: ");
 		for (size_t dim = 0; dim < gmm->pointDim * gmm->pointDim; ++dim)
-			fprintf(stdout, "%.2f ", gmm->sigma[mixture * gmm->pointDim * gmm->pointDim + dim]);
+			fprintf(stdout, "%.3f ", gmm->sigma[mixture * gmm->pointDim * gmm->pointDim + dim]);
 
 		fprintf(stdout, "\n\n");
 	}

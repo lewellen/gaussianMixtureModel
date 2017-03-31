@@ -47,20 +47,7 @@ struct GMM* fit(
 				&(prob[mixture * numPoints])
 			);
 		}
-
-		for (size_t point = 0; point < numPoints; ++point) {
-			double sum = 0.0;
-			for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
-				sum += prob[mixture * numPoints + point];
-			}
-
-			if (sum > tolerance) {
-				for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
-					prob[numPoints * mixture + point] /= sum;
-				}
-			}
-		}
-
+	
 		// 2015-09-20 GEL Eliminated redundant mvNorm clac in logLikelihood by 
 		// passing in precomputed prob values. Also moved loop termination here
 		// since likelihood determines termination. Result: 1.3x improvement in 
@@ -70,6 +57,20 @@ struct GMM* fit(
 		if (--maxIterations == 0 || !(maxIterations < 80 ? currentLogL > prevLogL : 1 == 1)) {
 			break;
 		}
+
+		for (size_t point = 0; point < numPoints; ++point) {
+			double sum = 0.0;
+			for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
+				sum += gmm->tau[mixture] * prob[mixture * numPoints + point];
+			}
+
+			if (sum > tolerance) {
+				for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
+					prob[numPoints * mixture + point] /= sum;
+				}
+			}
+		}
+		
 
 		// Let U[mixture] = \Sum_i T[mixture, i]
 		memset(margin, 0, numMixtures * sizeof(double));
@@ -81,14 +82,14 @@ struct GMM* fit(
 
 		double normTerm = 0;
 		for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
-			normTerm += margin[mixture];
+			normTerm += gmm->tau[mixture] * margin[mixture];
 		}
 
 		// --- M-Step ---
 
 		// Update tau
 		for (size_t mixture = 0; mixture < numMixtures; ++mixture) {
-			gmm->tau[mixture] = margin[mixture] / normTerm;
+			gmm->tau[mixture] *= margin[mixture] / normTerm;
 		}
 
 		// Update mu
@@ -229,6 +230,10 @@ void prepareCovariances(struct GMM* gmm) {
 		det *= det;
 
 		gmm->normalizer[mixture] = sqrt(pow(2.0 * PI, gmm->pointDim) * det);
+
+		assert(gmm->normalizer[mixture] > 0);
+		assert(gmm->normalizer[mixture] == gmm->normalizer[mixture]);
+		assert(gmm->normalizer[mixture] != INFINITY);
 	}
 }
 
@@ -288,13 +293,14 @@ void mvNormDist(
 	// Compute P exp( -0.5 innerProduct ) / normalizer
 	for (size_t point = 0; point < numPoints; ++point) {
 		P[point] = exp(-0.5 * innerProduct[point]) / gmm->normalizer[mixture];
-		if (P[point] < 1e-8) {
-			P[point] = 0.0;
-		}
+		
+		//if (P[point] < 1e-8) {
+		//	P[point] = 0.0;
+		//}
 
-		if (1.0 - P[point] < 1e-8) {
-			P[point] = 1.0;
-		}
+		//if (1.0 - P[point] < 1e-8) {
+		//	P[point] = 1.0;
+		//}
 	}
 
 	free(XM);
@@ -313,8 +319,9 @@ double logLikelihood(
 	double logL = 0.0;
 	for (size_t point = 0; point < numPoints; ++point) {
 		double inner = 0.0;
-		for (size_t mixture = 0; mixture < gmm->numMixtures; ++mixture)
+		for (size_t mixture = 0; mixture < gmm->numMixtures; ++mixture) {
 			inner += gmm->tau[mixture] * prob[mixture * numPoints + point];
+		}
 
 		logL += log(inner);
 	}

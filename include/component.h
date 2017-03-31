@@ -16,6 +16,11 @@ struct Component {
 	double normalizer;
 };
 
+void printToConsole(
+	const struct Component* component,
+	const size_t pointDim
+);
+
 void prepareCovariance(
 	struct Component* component, 
 	const size_t pointDim

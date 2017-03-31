@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "component.h"
@@ -8,6 +9,25 @@
 #ifndef PI
 #define PI 3.141592653589793238
 #endif
+
+void printToConsole(const struct Component* component, const size_t pointDim) {
+	if(component == NULL) {
+		fprintf(stdout, "NULL\n");
+		return;
+	}
+
+	fprintf(stdout, "pi: %.3f\n", component->pi);
+
+	fprintf(stdout, "mu: ");
+	for (size_t dim = 0; dim < pointDim; ++dim)
+		fprintf(stdout, "%.3f ", component->mu[dim]);
+
+	fprintf(stdout, "\nsigma: ");
+	for (size_t dim = 0; dim < pointDim * pointDim; ++dim)
+		fprintf(stdout, "%.3f ", component->sigma[dim]);
+
+	fprintf(stdout, "\n");
+}
 
 void prepareCovariance(struct Component* component, const size_t pointDim) {
 	assert(component != NULL);

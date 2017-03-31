@@ -5,27 +5,11 @@
 
 #include "datFile.h"
 #include "gmm.h"
+#include "util.h"
 
 void usage(const char* programName) {
 	assert(programName != NULL);
 	fprintf(stdout, "%s <train.dat> <numComponents>\n", programName);
-}
-
-int strToPositiveInteger(const char* str, size_t* value) {
-	assert(value != NULL);
-	*value = 0;
-
-	if(str == NULL || str[0] == '\0' || str[0] == '-') {
-		return 0;
-	}
-
-	errno = 0;
-	*value = strtoul(str, NULL, 10);
-	if(errno != 0 || *value == 0) {
-		return 0;
-	}
-	
-	return 1;
 }
 
 int main(int argc, char** argv) {
@@ -58,21 +42,8 @@ int main(int argc, char** argv) {
 	fprintf(stdout, "numPoints: %zu, pointDim: %zu\n", numPoints, pointDim);
 	fprintf(stdout, "numComponents: %zu\n", numComponents);
 	for (size_t k = 0; k < gmm->numComponents; ++k) {
-		struct Component* component = & gmm->components[k];
-
 		fprintf(stdout, "Mixture %zu:\n", k);
-
-		fprintf(stdout, "\tpi: %.3f\n", component->pi);
-
-		fprintf(stdout, "\tmu: ");
-		for (size_t dim = 0; dim < gmm->pointDim; ++dim)
-			fprintf(stdout, "%.3f ", component->mu[dim]);
-
-		fprintf(stdout, "\n\tsigma: ");
-		for (size_t dim = 0; dim < gmm->pointDim * gmm->pointDim; ++dim)
-			fprintf(stdout, "%.3f ", component->sigma[dim]);
-
-		fprintf(stdout, "\n\n");
+		printToConsole(& gmm->components[k], gmm->pointDim);
 	}
 
 	freeGMM(gmm);

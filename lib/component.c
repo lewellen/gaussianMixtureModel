@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "component.h"
 #include "linearAlgebra.h"
@@ -81,9 +82,12 @@ void mvNormDist(
 	double* innerProduct = (double*)malloc(numPoints * sizeof(double));
 
 	// Let XM = (x - m)
-	for (size_t point = 0; point < numPoints; ++point)
-		for (size_t dim = 0; dim < pointDim; ++dim)
-			XM[point * pointDim + dim] = X[point * pointDim + dim] - component->mu[dim];
+	for (size_t point = 0; point < numPoints; ++point) {
+		for (size_t dim = 0; dim < pointDim; ++dim) {
+			const size_t i = point * pointDim + dim;
+			XM[i] = X[i] - component->mu[dim];
+		}
+	}
 
 	// Sigma SXM = XM => Sigma^{-} XM = SXM
 	solvePositiveSemidefinite(
@@ -95,8 +99,8 @@ void mvNormDist(
 		);
 
 	// XM^T SXM
+	memset(innerProduct, 0, numPoints * sizeof(double));
 	for (size_t point = 0; point < numPoints; ++point) {
-		innerProduct[point] = 0.0;
 		for (size_t dim = 0; dim < pointDim; ++dim) {
 			innerProduct[point] += XM[point * pointDim + dim] * SXM[point * pointDim + dim];
 		}

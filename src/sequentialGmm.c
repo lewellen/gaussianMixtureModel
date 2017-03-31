@@ -5,6 +5,7 @@
 
 #include "datFile.h"
 #include "gmm.h"
+#include "seqGmm.h"
 #include "util.h"
 
 void usage(const char* programName) {

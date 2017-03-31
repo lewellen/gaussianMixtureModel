@@ -4,7 +4,7 @@ figs = $(patsubst doc/%.gpi, obj/%.tex, $(wildcard doc/*.gpi))
 
 ccTool = gcc
 ccFlags = -O3 -Wall -std=iso9899:1999
-ccLibs = -lm
+ccLibs = -lm -pthread
 
 .PHONY: all clean
 .PRECIOUS: obj/src/%.o obj/%.dat obj/%-summary.dat obj/%.tex obj/%.eps

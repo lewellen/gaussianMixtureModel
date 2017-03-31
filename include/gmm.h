@@ -14,13 +14,6 @@ struct GMM {
 	struct Component* components;
 };
 
-struct GMM* fit(
-	const double* X, 
-	const size_t numPoints, 
-	const size_t pointDim, 
-	const size_t numComponents
-);
-
 struct GMM* initGMM(
 	const double* X, 
 	const size_t numPoints, 
@@ -29,10 +22,10 @@ struct GMM* initGMM(
 ); 
 
 void freeGMM(struct GMM* gmm);
-
+ 
 double logLikelihood(
 	const struct GMM* gmm,
 	const double* prob, const size_t numPoints
-); 
- 
+);
+
 #endif

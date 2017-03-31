@@ -43,7 +43,7 @@ void choleskyDecomposition(const double* A, const size_t pointDim, double* L) {
 		sum = A[k * pointDim + k] - sum;
 		if (sum <= 0) {
 			fprintf(stdout, "A must be positive definite.\n");
-			exit(1);
+			assert(sum > 0);
 			break;
 		}
 

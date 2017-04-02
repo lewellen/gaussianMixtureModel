@@ -129,8 +129,6 @@ int shouldContinue(
 	const double prevLogL, const double currentLogL,
 	const double tolerance
 ) {
-	assert(prevLogL <= currentLogL);
-
 	if(maxIterations == 0) {
 		return 0;
 	}

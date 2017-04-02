@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +49,17 @@ void prepareCovariance(struct Component* component, const size_t pointDim) {
 	}
 
 	det *= det;
+
+	if(det < DBL_EPSILON) {
+		fprintf(stdout, "sigma:\n");
+		for(size_t i = 0; i < pointDim; ++i) {
+			for(size_t j = 0; j < pointDim; ++j) {
+				fprintf(stdout, "%f ", component->sigmaL[i*pointDim + j]);
+			} fprintf(stdout, "\n");
+		}
+	}
+
+	assert(det >= DBL_EPSILON);
 
 	component->normalizer = sqrt(pow(2.0 * PI, pointDim) * det);
 }

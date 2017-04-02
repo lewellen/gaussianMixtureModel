@@ -16,12 +16,14 @@ void choleskyDecomposition(const double* A, const size_t pointDim, double* L) {
 	assert(A != NULL);
 	for(size_t i = 0; i < pointDim; ++i) {
 		for(size_t j = 0; j < pointDim; ++j) {
+			// Check that we are real valued
 			double a = A[i * pointDim + j];
 			if(a != a || fabs(a) == INFINITY) {
 				fprintf(stdout, "A[%zu, %zu] = %f should be real value\n", i,j,a);
 				assert(0);
 			}
 
+			// Check that we are symmetric
 			double b = A[j * pointDim + i];
 			if(fabs(a-b) > DBL_EPSILON) {
 				fprintf(stdout, "A[%zu, %zu] should be symmetric (%f != %f)\n", i, j, a, b);
@@ -42,6 +44,15 @@ void choleskyDecomposition(const double* A, const size_t pointDim, double* L) {
 
 		sum = A[k * pointDim + k] - sum;
 		if (sum <= 0) {
+			fprintf(stdout, "A:\n");
+			for(size_t i = 0; i < pointDim; ++i) {
+				for(size_t j = 0; j < pointDim; ++j) {
+					fprintf(stdout, "%f ", A[i*pointDim+j]);
+				}
+				fprintf(stdout, "\n");
+			}
+
+			// If this happens then we are not positive definite.
 			fprintf(stdout, "A must be positive definite.\n");
 			assert(sum > 0);
 			break;

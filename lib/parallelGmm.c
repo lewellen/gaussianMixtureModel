@@ -9,38 +9,6 @@
 #include "parallelGmm.h"
 #include "util.h"
 
-struct SharedThreadStartArgs {
-	const double* X;
-	size_t numPoints;
-	size_t pointDim;
-
-	struct GMM* gmm;
-
-	double tolerance;
-	size_t maxIterations;
-	double prevLogL;
-	double currentLogL;
-
-	int shouldContinue;
-
-	double* gamma;
-	double* Gamma;
-	double GammaSum;
-
-	struct Barrier* barrier;
-};
-
-struct ThreadStartArgs {
-	size_t id;
-
-	struct SharedThreadStartArgs* shared;		
-	struct Component* component;
-	double* gammaComponent;
-
-	size_t pointStart;
-	size_t pointEnd; // i = pointStart; i < pointEnd; ++i
-};
-
 void checkStopCriteria(void* untypedArgs) {
 	struct SharedThreadStartArgs* sargs = (struct SharedThreadStartArgs*) untypedArgs;
 	assert(sargs != NULL);
@@ -76,7 +44,6 @@ void* parallelFitStart(void* untypedArgs) {
 	assert(args != NULL);
 
 	struct SharedThreadStartArgs* sargs = args->shared;
-	struct Component* component = args->component;
 	const size_t numPoints = sargs->numPoints;
 	const size_t pointDim = sargs->pointDim;
 
@@ -87,11 +54,13 @@ void* parallelFitStart(void* untypedArgs) {
 		// --- E-Step ---
 
 		// Compute gamma
-		mvNormDist(
-			component, sargs->pointDim, 
-			sargs->X, numPoints, 
-			args->gammaComponent
-		);
+		for(size_t k = args->componentStart; k < args->componentEnd; ++k) {
+			mvNormDist(
+				& sargs->gmm->components[k], sargs->pointDim, 
+				sargs->X, numPoints, 
+				& sargs->gamma[k * numPoints]
+			);
+		}
 
 		arriveAt(sargs->barrier, sargs, checkStopCriteria);
 		if(!sargs->shouldContinue) {
@@ -117,57 +86,63 @@ void* parallelFitStart(void* untypedArgs) {
 		arriveAt(sargs->barrier, NULL, NULL);
 
 		// Afterwards, everybody does
-		double GammaK = 0;
-		for (size_t point = 0; point < numPoints; ++point) {
-			GammaK += args->gammaComponent[point];
+		for(size_t k = args->componentStart; k < args->componentEnd; ++k) {
+			double GammaK = 0;
+			for (size_t point = 0; point < numPoints; ++point) {
+				GammaK += sargs->gamma[k * numPoints + point];
+			}
+			sargs->Gamma[k] = GammaK;
 		}
 
 		// Using local sum to avoid multicore cache coherence overhead until we have to
-		sargs->Gamma[ args->id ] = GammaK;
 
-		arriveAt(sargs->barrier, sargs, computeGammaSum);	
+		arriveAt(sargs->barrier, sargs, computeGammaSum);
 
 		// --- M-Step ---
-		// Update pi
-		component->pi *= GammaK / sargs->GammaSum;
-		
-		// Update mu
-		memset(component->mu, 0, pointDim * sizeof(double));
-		for (size_t point = 0; point < numPoints; ++point) {
-			for (size_t dim = 0; dim < pointDim; ++dim) {
-				component->mu[dim] += args->gammaComponent[point] * sargs->X[point * pointDim + dim];
-			}
-		}
+		for(size_t k = args->componentStart; k < args->componentEnd; ++k) {
+			struct Component* component = & sargs->gmm->components[k];
 
-		for (size_t i = 0; i < pointDim; ++i) {
-			component->mu[i] /= GammaK;
-		}
-
-		// Update sigma
-		memset(component->sigma, 0, pointDim * pointDim * sizeof(double));
-		for (size_t point = 0; point < numPoints; ++point) {
-			// (x - m)
-			for (size_t dim = 0; dim < pointDim; ++dim) {
-				xm[dim] = sargs->X[point * pointDim + dim] - component->mu[dim];
+			// Update pi
+			component->pi *= sargs->Gamma[k] / sargs->GammaSum;
+			
+			// Update mu
+			memset(component->mu, 0, pointDim * sizeof(double));
+			for (size_t point = 0; point < numPoints; ++point) {
+				for (size_t dim = 0; dim < pointDim; ++dim) {
+					component->mu[dim] += sargs->gamma[k * numPoints + point] * sargs->X[point * pointDim + dim];
+				}
 			}
 
-			// (x - m) (x - m)^T
-			for (size_t row = 0; row < pointDim; ++row) {
-				for (size_t column = 0; column < pointDim; ++column) {
-					outerProduct[row * pointDim + column] = xm[row] * xm[column];
+			for (size_t i = 0; i < pointDim; ++i) {
+				component->mu[i] /= sargs->Gamma[k];
+			}
+
+			// Update sigma
+			memset(component->sigma, 0, pointDim * pointDim * sizeof(double));
+			for (size_t point = 0; point < numPoints; ++point) {
+				// (x - m)
+				for (size_t dim = 0; dim < pointDim; ++dim) {
+					xm[dim] = sargs->X[point * pointDim + dim] - component->mu[dim];
+				}
+
+				// (x - m) (x - m)^T
+				for (size_t row = 0; row < pointDim; ++row) {
+					for (size_t column = 0; column < pointDim; ++column) {
+						outerProduct[row * pointDim + column] = xm[row] * xm[column];
+					}
+				}
+
+				for (size_t i = 0; i < pointDim * pointDim; ++i) {
+					component->sigma[i] += sargs->gamma[k * numPoints + point] * outerProduct[i];
 				}
 			}
 
 			for (size_t i = 0; i < pointDim * pointDim; ++i) {
-				component->sigma[i] += args->gammaComponent[point] * outerProduct[i];
+				component->sigma[i] /= sargs->Gamma[k];
 			}
+		
+			prepareCovariance(component, pointDim);
 		}
-
-		for (size_t i = 0; i < pointDim * pointDim; ++i) {
-			component->sigma[i] /= GammaK;
-		}
-	
-		prepareCovariance(component, pointDim);
 
 	} while (1 == 1);
 
@@ -192,9 +167,12 @@ struct GMM* parallelFit(
 		return fit(X, numPoints, pointDim, numComponents);
 	}
 
-	size_t numProcessors = numComponents;
-
 	struct GMM* gmm = initGMM(X, numPoints, pointDim, numComponents);
+
+	size_t numProcessors = 8;
+	if(numComponents < numProcessors) {
+		numProcessors = numComponents;
+	}
 
 	struct Barrier barrier;
 	initBarrier(&barrier, numProcessors);
@@ -215,29 +193,38 @@ struct GMM* parallelFit(
 	stsa.GammaSum = 0.0;
 	stsa.barrier = &barrier;
 
-	size_t residual = numPoints % numProcessors;
-	size_t pointsPerProcessor = (numPoints - residual) / numProcessors;
+	size_t pointResidual = numPoints % numProcessors;
+	size_t pointsPerProcessor = (numPoints - pointResidual) / numProcessors;
+
+	size_t componentResidual = numComponents % numProcessors;
+	size_t componentsPerProcessor = (numComponents - componentResidual) / numProcessors;
 
 	struct ThreadStartArgs args[numProcessors];
 	for(size_t i = 0; i < numProcessors; ++i) {
 		args[i].id = i;	
 		args[i].shared = &stsa;
-		args[i].component = & gmm->components[i];
-		args[i].gammaComponent = & stsa.gamma[i * numPoints];
 
 		if(i == 0) {
 			args[i].pointStart = 0;
+			args[i].componentStart = 0;
 		} else {
-			args[i].pointStart = args[i-1].pointEnd;
+			args[i].pointStart = args[i - 1].pointEnd;
+			args[i].componentStart = args[i - 1].componentEnd;
 		}
 
 		args[i].pointEnd = args[i].pointStart + pointsPerProcessor;
-		if(residual > 0) {
-			--residual;
+		if(pointResidual > 0) {
+			--pointResidual;
 			++args[i].pointEnd;
 		}
 
 		assert(args[i].pointEnd <= numPoints);
+
+		args[i].componentEnd = args[i].componentStart + componentsPerProcessor;
+		if(componentResidual > 0) {
+			--componentResidual;
+			++args[i].componentEnd;
+		}
 	}
 
 	size_t numThreads = numProcessors - 1;

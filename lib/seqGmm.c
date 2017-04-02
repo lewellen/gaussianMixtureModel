@@ -25,21 +25,28 @@ struct GMM* fit(
 	double prevLogL = -INFINITY;
 	double currentLogL = -INFINITY;
 
-	double* gamma = (double*)checkedCalloc(numPoints * numComponents, sizeof(double));
-	double* Gamma = (double*)checkedCalloc(numComponents, sizeof(double));
+	double* logpi = (double*)checkedCalloc(numComponents, sizeof(double));
+	double* loggamma = (double*)checkedCalloc(numPoints * numComponents, sizeof(double));
+	double* logGamma = (double*)checkedCalloc(numComponents, sizeof(double));
 
 	double* xm = (double*)checkedCalloc(pointDim, sizeof(double));
 	double* outerProduct = (double*)checkedCalloc(pointDim * pointDim, sizeof(double));
+
+	for(size_t k = 0; k < numComponents; ++k) {
+		const double pik = gmm->components[k].pi;
+		assert(pik >= 0);
+		logpi[k] = log(pik);
+	}
 
 	do {
 		// --- E-Step ---
 
 		// Compute gamma
 		for (size_t k = 0; k < numComponents; ++k) {
-			mvNormDist(
-				& gmm->components[k], gmm->pointDim, 
+			logMvNormDist(
+				& gmm->components[k], gmm->pointDim,
 				X, numPoints, 
-				& gamma[k * numPoints]
+				& loggamma[k * numPoints]
 			);
 		}
 	
@@ -48,35 +55,74 @@ struct GMM* fit(
 		// since likelihood determines termination. Result: 1.3x improvement in 
 		// execution time.  (~8 ms to ~6 ms on oldFaithful.dat)
 		prevLogL = currentLogL;
-		currentLogL = logLikelihood(gmm, gamma, numPoints);
+		currentLogL = logLikelihood(logpi, numComponents, loggamma, numPoints);
 		if (--maxIterations == 0 || !(maxIterations < 80 ? currentLogL > prevLogL : 1 == 1)) {
 			break;
 		}
 
+		// convert loggamma (really p(x_n|mu_k, Sigma_k)) into actual loggamma
 		for (size_t point = 0; point < numPoints; ++point) {
-			double sum = 0.0;
+			double maxArg = -INFINITY;
 			for (size_t k = 0; k < numComponents; ++k) {
-				sum += gmm->components[k].pi * gamma[k * numPoints + point];
+				const double arg = logpi[k] + loggamma[k * numPoints + point];
+				if(arg > maxArg) {
+					maxArg = arg;
+				}
 			}
 
-			if (sum > tolerance) {
-				for (size_t k = 0; k < numComponents; ++k) {
-					gamma[k * numPoints + point] /= sum;
-				}
+			// compute log p(x)
+			double sum = 0;
+			for(size_t k = 0; k < numComponents; ++k) {
+				const double arg = logpi[k] + loggamma[k * numPoints + point];
+				sum += exp(arg - maxArg);
+			}
+			assert(sum >= 0);
+
+			const double logpx = maxArg + log(sum);
+			for(size_t k = 0; k < numComponents; ++k) {
+				loggamma[k * numPoints + point] += -logpx;
 			}
 		}
 
 		// Let Gamma[component] = \Sum_point gamma[component, point]
-		memset(Gamma, 0, numComponents * sizeof(double));
-		for (size_t k = 0; k < numComponents; ++k) {
-			for (size_t point = 0; point < numPoints; ++point) {
-				Gamma[k] += gamma[k * numPoints + point];
+		memset(logGamma, 0, numComponents * sizeof(double));
+		for(size_t k = 0; k < numComponents; ++k) {
+			double maxArg = -INFINITY;
+			for(size_t point = 0; point < numPoints; ++point) {
+				const double loggammank = loggamma[k * numPoints + point];
+				if(loggammank > maxArg) {
+					maxArg = loggammank;
+				}
 			}
-		}
 
-		double GammaSum = 0;
-		for (size_t k = 0; k < numComponents; ++k) {
-			GammaSum += gmm->components[k].pi * Gamma[k];
+			double sum = 0;
+			for(size_t point = 0; point < numPoints; ++point) {
+				const double loggammank = loggamma[k * numPoints + point];
+				sum += exp(loggammank - maxArg);
+			}
+			assert(sum >= 0);
+
+			logGamma[k] = maxArg + log(sum);
+		}
+		
+		double logGammaSum = 0;
+		{
+			double maxArg = -INFINITY;
+			for(size_t k = 0; k < numComponents; ++k) {
+				const double arg = logpi[k] + logGamma[k];
+				if(arg > maxArg) {
+					maxArg = arg;
+				}
+			}
+
+			double sum = 0;
+			for (size_t k = 0; k < numComponents; ++k) {
+				const double arg = logpi[k] + logGamma[k];
+				sum += exp(arg - maxArg);
+			}
+			assert(sum >= 0);
+
+			logGammaSum = maxArg + log(sum);
 		}
 
 		// --- M-Step ---
@@ -84,18 +130,20 @@ struct GMM* fit(
 			struct Component* component = & gmm->components[k];
 	
 			// Update pi
-			component->pi *= Gamma[k] / GammaSum;
-			
+			logpi[k] += logGamma[k] - logGammaSum;
+			component->pi = exp(logpi[k]);
+			assert(0 <= component->pi && component->pi <= 1);
+	
 			// Update mu
 			memset(component->mu, 0, pointDim * sizeof(double));
 			for (size_t point = 0; point < numPoints; ++point) {
 				for (size_t dim = 0; dim < pointDim; ++dim) {
-					component->mu[dim] += gamma[k * numPoints + point] * X[point * pointDim + dim];
+					component->mu[dim] += exp(loggamma[k * numPoints + point]) * X[point * pointDim + dim];
 				}
 			}
 
 			for (size_t i = 0; i < pointDim; ++i) {
-				component->mu[i] /= Gamma[k];
+				component->mu[i] /= exp(logGamma[k]);
 			}
 
 			// Update sigma
@@ -114,12 +162,12 @@ struct GMM* fit(
 				}
 
 				for (size_t i = 0; i < pointDim * pointDim; ++i) {
-					component->sigma[i] += gamma[k * numPoints + point] * outerProduct[i];
+					component->sigma[i] += exp(loggamma[k * numPoints + point]) * outerProduct[i];
 				}
 			}
 
 			for (size_t i = 0; i < pointDim * pointDim; ++i) {
-				component->sigma[i] /= Gamma[k];
+				component->sigma[i] /= exp(logGamma[k]);
 			}
 		
 			prepareCovariance(component, pointDim);
@@ -127,8 +175,9 @@ struct GMM* fit(
 
 	} while (1 == 1);
 
-	free(gamma);
-	free(Gamma);
+	free(logpi);
+	free(loggamma);
+	free(logGamma);
 
 	free(xm);
 	free(outerProduct);

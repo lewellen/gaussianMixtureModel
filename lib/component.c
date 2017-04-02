@@ -42,29 +42,21 @@ void prepareCovariance(struct Component* component, const size_t pointDim) {
 		component->sigmaL
 	);
 
-	// det(Sigma) = det(L L^T) = det(L)^2
-	double det = 1.0;
+	// log det(Sigma) = log det(L L^T) = log det(L)^2 = 2 log prod L_{i,i} 
+	//		  = 2 sum log L_{i,i}
+	double logDet = 1.0;
 	for (size_t i = 0; i < pointDim; ++i) {
-		det *= component->sigmaL[i * pointDim + i];
+		double diag = component->sigmaL[i * pointDim + i];
+		assert(diag > 0);
+		logDet += log(diag);
 	}
 
-	det *= det;
+	logDet *= 2;
 
-	if(det < DBL_EPSILON) {
-		fprintf(stdout, "sigma:\n");
-		for(size_t i = 0; i < pointDim; ++i) {
-			for(size_t j = 0; j < pointDim; ++j) {
-				fprintf(stdout, "%f ", component->sigmaL[i*pointDim + j]);
-			} fprintf(stdout, "\n");
-		}
-	}
-
-	assert(det >= DBL_EPSILON);
-
-	component->normalizer = sqrt(pow(2.0 * PI, pointDim) * det);
+	component->normalizer = - 0.5 * (pointDim * log(2.0 * PI) + logDet);
 }
 
-void mvNormDist(
+void logMvNormDist(
 	const struct Component* component, const size_t pointDim,
 	const double* X, const size_t numPoints, 
 	double* P
@@ -120,14 +112,8 @@ void mvNormDist(
 
 	// Compute P exp( -0.5 innerProduct ) / normalizer
 	for (size_t point = 0; point < numPoints; ++point) {
-		P[point] = exp(-0.5 * innerProduct[point]) / component->normalizer;
-		if (P[point] < 1e-8) {
-			P[point] = 0.0;
-		}
-
-		if (1.0 - P[point] < 1e-8) {
-			P[point] = 1.0;
-		}
+		// Normalizer already has negative sign on it.
+		P[point] = -0.5 * innerProduct[point] + component->normalizer;
 	}
 
 	free(XM);

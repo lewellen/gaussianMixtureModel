@@ -24,8 +24,8 @@ struct GMM* initGMM(
 void freeGMM(struct GMM* gmm);
  
 double logLikelihood(
-	const struct GMM* gmm,
-	const double* prob, const size_t numPoints
+	const double* logpi, const size_t numComponents,
+	const double* logProb, const size_t numPoints
 );
 
 #endif

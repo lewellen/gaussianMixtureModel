@@ -39,7 +39,7 @@
 Gaussian Mixture Models \cite[435-439]{bishop2006} offer a simple way to capture complex densities by employing a linear combination of $K$ multivariate Gaussian distributions, each with their own mean, covariance, and mixture coefficient, $\pi_{k}$, s.t. $\sum_{k} \pi_{k} = 1$.
 
 \begin{equation}
-	p( x ) = \sum_{k} \pi_{k} p(x \lvert \mu_k, \Sigma_k)
+	p( x ) = \sum_{k = 1}^{K} \pi_{k} p(x \lvert \mu_k, \Sigma_k)
 \end{equation}
 
 Of practical interest is the learning of the number of components and the values of the parameters. Evaluation criteria, such as AIC or BIC, can be used to identify the number of components, or non-parametric models like Dirichlet processes can be used to avoid the matter all together. We won't cover these techniques here, but will instead focus on finding the values of the parameters given sufficient training data using the Expectation-Maximization algorithm \cite{dempster1977maximum}, and doing so efficiently on the GPU. Technical considerations will be discussed and the work will conclude with an empirical evaluation of sequential and parallel implementations for the CPU, and a massively parallel implementation for the GPU for varying numbers of components, points, and point dimensions.
@@ -66,32 +66,32 @@ To avoid numerical issues such as overflow and underflow, we're going to conside
 From an unsupervised learning point of view, GMMs can be seen as a generalization of k-means allowing for partial assignment of points to multiple classes. A possible classifier is given by $k^{*} = \arg\max_k \, \log \pi_{k} + \log p(x \lvert \mu_k, \Sigma_k)$. Alternatively, multiple components can be used to represent a single class and we argmax over the corresponding subset sums. The Expectation-Maximization (EM) algorithm will be used to find the parameters of of the model by incrementally computing probabilities given a fixed set of parameters, then updating those parameters by maximizing the log-likelihood of the data:
 
 \begin{equation}
-	\mathcal{L} \left( \mathcal{D} \lvert \mu, \Sigma \right) = \sum_{n = 1}^{N} \log p(x) = \log{ \left [ \sum_{k = 1}^{K} \pi_{k} p \left( x_n \lvert \mu_k, \Sigma_k \right ) \right ] }
+	\mathcal{L} \left( \mathcal{D} \lvert \mu, \Sigma \right) = \sum_{n = 1}^{N} \log p(x_n) = \sum_{n=1}^{N} \log{ \left [ \sum_{k = 1}^{K} \pi_{k} p \left( x_n \lvert \mu_k, \Sigma_k \right ) \right ] }
 	\label{eqn:loglikelihood}
 \end{equation}
 
-Because we are dealing with exponents and logarithms, it's very easy to end up with underflow and overflow situtations, so we'll continue the trend of working in log-space and also make use of the "log-sum-exp trick" to avoid complications:
+Because we are dealing with exponents and logarithms, it's very easy to end up with underflow and overflow situtations, so we'll continue the trend of working in log-space and also make use of the "log-sum-exp trick" to avoid these complications:
 
 \begin{equation}
-	\log p( x ) = a + \log \left[ \sum_{k} \exp{ \left( \log \pi_{k} + \log p(x \lvert \mu_k, \Sigma_k) - a \right ) } \right ]
+	\log p( x ) = a + \log \left[ \sum_{k = 1}^{K} \exp{ \left( \log \pi_{k} + \log p(x \lvert \mu_k, \Sigma_k) - a \right ) } \right ]
 \end{equation}
 
-Where the $a$ term is the maximum exponential argument within a stated sum. Within the expectation stage of the algorithm we will compute the posterior distributions of the components conditioned on the training data:
+Where the $a$ term is the maximum exponential argument within a stated sum. Within the expectation stage of the algorithm we will compute the posterior distributions of the components conditioned on the training data (we ommit the mixing coefficient since it cancels out in the maximization steps of $\mu_k$ and $\Sigma_k$, and account for it explicitly in the update of $\pi_k$):
 
 \begin{equation}
-	\gamma_{k, n} = \frac{ \pi_{k} p \left ( x_n \lvert \mu_k, \Sigma_k \right ) }{ p(x) } \qquad \Gamma_k = \sum_{n=1}^{N} \gamma_{k, n}
+	\gamma_{k, n} = \frac{ p \left ( x_n \lvert \mu_k, \Sigma_k \right ) }{ p(x) } \qquad \Gamma_k = \sum_{n=1}^{N} \gamma_{k, n}
 \end{equation}
 
 \begin{equation}
-	\log \gamma_{k, n} = \log \pi_{k} + \log p \left ( x_n \lvert \mu_k, \Sigma_k \right )  - \log p(x) \qquad \log \Gamma_k = a + \log \left [ \sum_{n=1}^{N} \exp{ \left( \log \gamma_{k, n} - a \right )} \right ]
+	\log \gamma_{k, n} =  \log p \left ( x_n \lvert \mu_k, \Sigma_k \right )  - \log p(x) \qquad \log \Gamma_k = a + \log \left [ \sum_{n=1}^{N} \exp{ \left( \log \gamma_{k, n} - a \right )} \right ]
 \end{equation}
 
 The new parameters are resolved within the maximization step:
 
 \begin{equation}
-	\pi_{k}^{(t+1)} = \frac{ \pi_{k}^{(t)} \Gamma_k }{ \sum_{i=1}^{K} \Gamma_i }
+	\pi_{k}^{(t+1)} = \frac{ \pi_{k}^{(t)} \Gamma_k }{ \sum_{i=1}^{K} \pi_{i}^{(t)} \Gamma_i }
 	\qquad
-	\log \pi_{k}^{(t+1)} = \log \pi_{k}^{(t)} + \log \Gamma_k - a - \log \left [ \sum_{i=1}^{K} \exp{ \left( \log \Gamma_i - a \right )} \right ]
+	\log \pi_{k}^{(t+1)} = \log \pi_{k}^{(t)} + \log \Gamma_k - a - \log \left [ \sum_{i=1}^{K} \exp{ \left( \log \pi_{i}^{(t)} + \log \Gamma_i - a \right )} \right ]
 \end{equation}
 
 \begin{equation}

@@ -68,20 +68,32 @@ void freeGMM(struct GMM* gmm) {
 }
 
 double logLikelihood(
-	const struct GMM* gmm,
-	const double* prob, const size_t numPoints
+	const double* logpi, const size_t numComponents,
+	const double* logProb, const size_t numPoints
 ) { 
-	assert(gmm != NULL);
-	assert(prob != NULL);
+	assert(logpi != NULL);
+	assert(numComponents > 0);
+	assert(logProb != NULL);
 	assert(numPoints > 0);
 
 	double logL = 0.0;
 	for (size_t point = 0; point < numPoints; ++point) {
-		double inner = 0.0;
-		for (size_t component = 0; component < gmm->numComponents; ++component)
-			inner += gmm->components[component].pi * prob[component * numPoints + point];
+		double maxArg = -INFINITY;
+		for(size_t k = 0; k < numComponents; ++k) {
+			const double logProbK = logpi[k] + logProb[k * numPoints + point];
+			if(logProbK > maxArg) {
+				maxArg = logProbK;
+			}
+		}
 
-		logL += log(inner);
+		double sum = 0.0;
+		for (size_t k = 0; k < numComponents; ++k) {
+			const double logProbK = logpi[k] + logProb[k * numPoints + point];
+			sum = exp(logProbK - maxArg);
+		}
+
+		assert(sum >= 0);
+		logL += maxArg + log(sum);
 	}
 
 	return logL;

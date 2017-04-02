@@ -26,10 +26,10 @@ void prepareCovariance(
 	const size_t pointDim
 ); 
 
-void mvNormDist(
+void logMvNormDist(
 	const struct Component* component, const size_t pointDim, 
 	const double* X, const size_t numPoints, 
-	double* P
+	double* logProb
 ); 
 
 #endif

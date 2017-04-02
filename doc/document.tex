@@ -1,0 +1,145 @@
+\documentclass{article}
+
+\usepackage{amsmath, amsfonts}
+\usepackage{float}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage[table]{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{matrix}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{multicol}
+\usepackage [english]{babel}
+\usepackage [autostyle, english = american]{csquotes}
+\MakeOuterQuote{"}
+
+\newgeometry{margin=1.25in}
+
+\newcommand{\set}[1]{\lbrace #1 \rbrace}
+\newcommand{\boundedBy}[1]{\mathcal{O} \left ( #1 \right )}
+\newcommand{\expected}[1]{\mathbb{E} \left ( #1 \right )}
+\newcommand{\exprv}[1]{\text{Exp} \left( #1 \right )}
+\newcommand{\uniformrv}[2]{\mathcal{U} \left( #1, #2 \right )}
+\newcommand{\FuncCall}[2]{\textsc{#1} \left ( #2 \right )}
+\newcommand{\prob}[1]{\mathbb{P}\left(#1\right)}
+\newcommand{\cprob}[2]{\prob{#1\lvert#2}}
+\newcommand{\factcheck}[0]{\textcolor{red}{VERIFY}}
+\newcommand{\eqn}[1]{\ref{eqn:#1}}
+
+\begin{document}
+
+\author{Garrett Lewellen}
+\title{Expectation Maximization for Gaussian Mixture Models on the GPU}
+
+\maketitle
+
+\section{Introduction}
+
+Gaussian Mixture Models \cite[435-439]{bishop2006} offer a simple way to capture complex densities by employing a linear combination of $K$ multivariate Gaussian distributions, each with their own mean, covariance, and mixture coefficient, $\pi_{k}$, s.t. $\sum_{k} \pi_{k} = 1$.
+
+\begin{equation}
+	p( x ) = \sum_{k} \pi_{k} p(x \lvert \mu_k, \Sigma_k)
+\end{equation}
+
+Of practical interest is the learning of the number of components and the values of the parameters. Evaluation criteria, such as AIC or BIC, can be used to identify the number of components, or non-parametric models like Dirichlet processes can be used to avoid the matter all together. We won't cover these techniques here, but will instead focus on finding the values of the parameters given sufficient training data using the Expectation-Maximization algorithm \cite{dempster1977maximum}, and doing so efficiently on the GPU. Technical considerations will be discussed and the work will conclude with an empirical evaluation of sequential and parallel implementations for the CPU, and a massively parallel implementation for the GPU for varying numbers of components, points, and point dimensions.
+
+\section{Multivariate Gaussian Distribution}
+
+The multivariate Gaussian distribution With mean, $\mu \in \mathbb{R}^d, d \in \mathbb{N}_1$, and symmetric, positive definite covariance, $\Sigma \in \mathbb{R}^{d \times d}$, is given by:
+
+\begin{equation}
+	p( x \lvert \mu, \Sigma ) = \frac{1}{\sqrt{(2\pi)^d \lvert \Sigma \rvert }} \exp{\left( - (x - \mu)^{T} \Sigma^{-} (x - \mu) / 2 \right)}
+	\label{eqn:mvn}
+\end{equation}
+
+From a computational perspective, we will be interested in evaluating the density for $N$ values. Thus, a naive implementation would be bounded by $\boundedBy{N d^4}$ due to the matrix determinate in the normalization term. We can improve upon this by computing the Cholesky factorization, $\Sigma = L L^T$, where $L$ is a lower triangular matrix \cite[157-158]{kincaid2002}. The factorization requries $\boundedBy{d^3}$ time and computing the determinate becomes $\boundedBy{d}$ by taking advantage of the fact that $\det\left(L L^T\right) = \det(L)^2 = \prod_i L_{i,i}^2$. Further, we can precompute the factorization and normalization factor for a given parameterization which leaves us with complexity of the Mahalanobis distance given by the quadratic form in the exponential. Naive computation requires one perform two vector matrix operations and find the inverse of the covariance matrix with worst case behavior $\boundedBy{d^3}$. Leveraging the Cholesky factorization, we'll end up solving a series of triangular systems by forward and backward substituion in $\boundedBy{d^2}$ and completing an inner product in $\boundedBy{d}$ as given by $L z = x - \mu$, $L^T z = y$, and $(x-\mu)^T y$. Thus, our pre-initialization time is $\boundedBy{d^3}$ and density determination given by $\boundedBy{N d^2}$. Further optimizations are possible by considering special diagonal cases of the covariance matrix, such as the isotropic, $\Sigma = \sigma I$, and non-isotropic, $\Sigma_{k,k} = \sigma_k$, cases. For robustness, we'll stick with the full covariance.
+
+\begin{equation}
+	\log p( x \lvert \mu, \Sigma ) = - \frac{1}{2} \left( d \log 2\pi + \log \lvert \Sigma \rvert \right ) - \frac{1}{2} (x - \mu)^{T} \Sigma^{-} (x - \mu)
+\end{equation}
+
+To avoid numerical issues such as overflow and underflow, we're going to consider $\log p(x \lvert \mu, \Sigma)$ throughout the remainder of the work. For estimates of the covariance matrix, we will want more samples than the dimension of the data to avoid a singular covariance matrix \cite{fan2016overview}. Even with this criteria satisfied, it may still be possible to produce a singular matrix if some of the data are collinear and span a subspace of $\mathbb{R}^d$.
+
+\section{Expectation Maximization}
+
+From an unsupervised learning point of view, GMMs can be seen as a generalization of k-means allowing for partial assignment of points to multiple classes. A possible classifier is given by $k^{*} = \arg\max_k \, \log \pi_{k} + \log p(x \lvert \mu_k, \Sigma_k)$. Alternatively, multiple components can be used to represent a single class and we argmax over the corresponding subset sums. The Expectation-Maximization (EM) algorithm will be used to find the parameters of of the model by incrementally computing probabilities given a fixed set of parameters, then updating those parameters by maximizing the log-likelihood of the data:
+
+\begin{equation}
+	\mathcal{L} \left( \mathcal{D} \lvert \mu, \Sigma \right) = \sum_{n = 1}^{N} \log p(x) = \log{ \left [ \sum_{k = 1}^{K} \pi_{k} p \left( x_n \lvert \mu_k, \Sigma_k \right ) \right ] }
+	\label{eqn:loglikelihood}
+\end{equation}
+
+Because we are dealing with exponents and logarithms, it's very easy to end up with underflow and overflow situtations, so we'll continue the trend of working in log-space and also make use of the "log-sum-exp trick" to avoid complications:
+
+\begin{equation}
+	\log p( x ) = a + \log \left[ \sum_{k} \exp{ \left( \log \pi_{k} + \log p(x \lvert \mu_k, \Sigma_k) - a \right ) } \right ]
+\end{equation}
+
+Where the $a$ term is the maximum exponential argument within a stated sum. Within the expectation stage of the algorithm we will compute the posterior distributions of the components conditioned on the training data:
+
+\begin{equation}
+	\gamma_{k, n} = \frac{ \pi_{k} p \left ( x_n \lvert \mu_k, \Sigma_k \right ) }{ p(x) } \qquad \Gamma_k = \sum_{n=1}^{N} \gamma_{k, n}
+\end{equation}
+
+\begin{equation}
+	\log \gamma_{k, n} = \log \pi_{k} + \log p \left ( x_n \lvert \mu_k, \Sigma_k \right )  - \log p(x) \qquad \log \Gamma_k = a + \log \left [ \sum_{n=1}^{N} \exp{ \left( \log \gamma_{k, n} - a \right )} \right ]
+\end{equation}
+
+The new parameters are resolved within the maximization step:
+
+\begin{equation}
+	\pi_{k}^{(t+1)} = \frac{ \pi_{k}^{(t)} \Gamma_k }{ \sum_{i=1}^{K} \Gamma_i }
+	\qquad
+	\log \pi_{k}^{(t+1)} = \log \pi_{k}^{(t)} + \log \Gamma_k - a - \log \left [ \sum_{i=1}^{K} \exp{ \left( \log \Gamma_i - a \right )} \right ]
+\end{equation}
+
+\begin{equation}
+	\mu_k^{(t+1)} = \frac{ \sum_{n=1}^{N} x_n \gamma_{n, k} }{ \Gamma_k  }
+	\qquad
+	\mu_k^{(t+1)} = \frac{ \sum_{n=1}^{N} x_n \exp{ \log \gamma_{n, k} } }{ \exp{ \log \Gamma_k }  }
+\end{equation}
+
+\begin{equation}
+	\Sigma_k^{(t+1)} = \frac{ \sum_{n=1}^{N} (x_n - \mu_k^{(t+1)}) (x_n - \mu_k^{(t+1)})^T \gamma_{n, k} }{ \Gamma_k  }
+\end{equation}
+
+\begin{equation}
+	\Sigma_k^{(t+1)} = \frac{ \sum_{n=1}^{N} (x_n - \mu_k^{(t+1)}) (x_n - \mu_k^{(t+1)})^T \exp \log \gamma_{n, k} }{ \exp \log \Gamma_k  }
+\end{equation}
+
+The algorithm continues back and forth between expectation and maximization stages until the change in log likelihood is less than some epsilon, or a maximum number of user specified iterations has elapsed.
+
+\section{Implementations}
+
+\paragraph{Sequential} Per iteration complexity given by $\boundedBy{2 K N d^2 + K N d + 2K + N + K d^3}$. We expect $d \le K < N$ because too many dimensions leads to a lot of dead space and too many components results in overfitting of the data. Thus, the dominating term for sequential execution is given by $\boundedBy{ 2 K N d^2 }$. 
+
+\paragraph{Parallel}
+
+\paragraph{Massively Parallel}
+
+\section{Evaluation}
+
+Three graphs represent sequential, parallel, and gpu:
+
+\begin{enumerate}
+	\item Fix $d, k$, vary $N$
+	\item Fix $d, N$, vary $k$
+	\item Fix $k, N$, vary $d$
+\end{enumerate}
+
+Two graphs
+
+\begin{enumerate}
+	\item Fix $d, k, N$ vary number of threads
+	\item Fix $d, k, n$ vary number of streaming multiprocessors (need to think that one over)
+\end{enumerate}
+
+Each graph should have about 10-15 samples per data point; each graph should include error bars after rejecting outliers. Times should be measured in seconds. Need to decide on commenting on gpu 32-bit single precision (for cheapo GPUs) and 64-bit double precision values on CPU.
+
+\section{Conclusion}
+
+\bibliographystyle{acm}
+\bibliography{doc/references}
+
+\end{document}

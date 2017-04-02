@@ -12,8 +12,8 @@ int main(int argc, char** argv) {
 	const size_t minNumComponents = 1;
 	const size_t maxNumComponents = 256;
 
-	const size_t numPoints = 1 << 16;
-	const size_t pointDim = 2;
+	const size_t numPoints = 1 << 14;
+	const size_t pointDim = 1;
 
 	const size_t numSamples = 10;
 

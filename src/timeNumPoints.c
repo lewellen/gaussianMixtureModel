@@ -13,7 +13,7 @@ int main(int argc, char** argv) {
 	const size_t maxNumPoints = 1048578;
 
 	const size_t numComponents = 8;
-	const size_t pointDim = 2;
+	const size_t pointDim = 1;
 
 	const size_t numSamples = 10;
 

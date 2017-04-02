@@ -197,8 +197,8 @@ void calcLogGammaK(
 
 	assert(logGamma != NULL);
 
-	memset(logGamma, 0, numComponents * sizeof(double));
-	for(size_t k = 0; k < numComponents; ++k) {
+	memset(&logGamma[componentStart], 0, (componentEnd - componentStart) * sizeof(double));
+	for(size_t k = componentStart; k < componentEnd; ++k) {
 		double maxArg = -INFINITY;
 		for(size_t point = 0; point < numPoints; ++point) {
 			const double loggammank = loggamma[k * numPoints + point];
@@ -244,7 +244,7 @@ double calcLogGammaSum(
 void performMStep(
 	struct Component* components, const size_t numComponents,
 	const size_t componentStart, const size_t componentEnd,
-	double* logpi, const double* loggamma, const double* logGamma, const double logGammaSum,
+	double* logpi, double* loggamma, double* logGamma, const double logGammaSum,
 	const double* X, const size_t numPoints, const size_t pointDim,
 	double* outerProduct, double* xm
 ) {
@@ -261,27 +261,47 @@ void performMStep(
 	assert(outerProduct != NULL);
 	assert(xm != NULL);
 
+
+	// update pi
 	for(size_t k = componentStart; k < componentEnd; ++k) {
 		struct Component* component = & components[k];
-
-		// Update pi
 		logpi[k] += logGamma[k] - logGammaSum;
 		component->pi = exp(logpi[k]);
 		assert(0 <= component->pi && component->pi <= 1);
+	}
 
-		// Update mu
+	// Convert loggamma and logGamma over to gamma and logGamma to avoid duplicate,
+	//  and costly, exp(x) calls.
+	for(size_t k = componentStart; k < componentEnd; ++k) {
+		for(size_t n = 0; n < numPoints; ++n) {
+			const size_t i = k * numPoints + n;
+			loggamma[i] = exp(loggamma[i]);
+		}
+	}
+
+	for(size_t k = componentStart; k < componentEnd; ++k) {
+		logGamma[k] = exp(logGamma[k]);
+	}
+
+	// Update mu
+	for(size_t k = componentStart; k < componentEnd; ++k) {
+		struct Component* component = & components[k];
+
 		memset(component->mu, 0, pointDim * sizeof(double));
 		for (size_t point = 0; point < numPoints; ++point) {
 			for (size_t dim = 0; dim < pointDim; ++dim) {
-				component->mu[dim] += exp(loggamma[k * numPoints + point]) * X[point * pointDim + dim];
+				component->mu[dim] += loggamma[k * numPoints + point] * X[point * pointDim + dim];
 			}
 		}
-
+	
 		for (size_t i = 0; i < pointDim; ++i) {
-			component->mu[i] /= exp(logGamma[k]);
+			component->mu[i] /= logGamma[k];
 		}
+	}
 
-		// Update sigma
+	// Update sigma
+	for(size_t k = componentStart; k < componentEnd; ++k) {
+		struct Component* component = & components[k];
 		memset(component->sigma, 0, pointDim * pointDim * sizeof(double));
 		for (size_t point = 0; point < numPoints; ++point) {
 			// (x - m)
@@ -297,12 +317,12 @@ void performMStep(
 			}
 
 			for (size_t i = 0; i < pointDim * pointDim; ++i) {
-				component->sigma[i] += exp(loggamma[k * numPoints + point]) * outerProduct[i];
+				component->sigma[i] += loggamma[k * numPoints + point] * outerProduct[i];
 			}
 		}
 
 		for (size_t i = 0; i < pointDim * pointDim; ++i) {
-			component->sigma[i] /= exp(logGamma[k]);
+			component->sigma[i] /= logGamma[k];
 		}
 	
 		prepareCovariance(component, pointDim);

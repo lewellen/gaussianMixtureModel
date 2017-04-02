@@ -61,7 +61,7 @@ double calcLogGammaSum(
 void performMStep(
 	struct Component* components, const size_t numComponents,
 	const size_t componentStart, const size_t componentEnd,
-	double* logpi, const double* loggamma, const double* logGamma, const double logGammaSum,
+	double* logpi, double* loggamma, double* logGamma, const double logGammaSum,
 	const double* X, const size_t numPoints, const size_t pointDim,
 	double* outerProduct, double* xm
 );

@@ -20,42 +20,23 @@ void checkStopCriteria(void* untypedArgs) {
 	);
 
 	assert(sargs->maxIterations > 0);
-	if(--sargs->maxIterations == 0) {
-		sargs->shouldContinue = 0;
-	} else if(sargs->maxIterations >= 80) {
-		// assumes maxIterations = 100, so we always do atleast 20 iterations
-		sargs->shouldContinue = 1;
-	} else if(fabs(sargs->currentLogL - sargs->prevLogL) < sargs->tolerance ) {
-		sargs->shouldContinue = 0;
-	} else {
-		sargs->shouldContinue = 1;
-	}
+	--sargs->maxIterations;
+	sargs->shouldContinue = shouldContinue(
+		sargs->maxIterations,
+		sargs->prevLogL, sargs->currentLogL,
+		sargs->tolerance
+	);
 }
 
 void computeGammaSum(void* untypedArgs) {
 	struct SharedThreadStartArgs* sargs = (struct SharedThreadStartArgs*) untypedArgs;
 	assert(sargs != NULL);
 
-	const size_t numComponents = sargs->gmm->numComponents;
-	const double* logpi = sargs->logpi;
-	const double* logGamma = sargs->logGamma;
-
-	double maxArg = -INFINITY;
-	for(size_t k = 0; k < numComponents; ++k) {
-		const double arg = logpi[k] + logGamma[k];
-		if(arg > maxArg) {
-			maxArg = arg;
-		}
-	}
-
-	double sum = 0;
-	for (size_t k = 0; k < numComponents; ++k) {
-		const double arg = logpi[k] + logGamma[k];
-		sum += exp(arg - maxArg);
-	}
-	assert(sum >= 0);
-
-	sargs->logGammaSum = maxArg + log(sum);
+	sargs->logGammaSum = calcLogGammaSum( 
+		sargs->logpi, 
+		sargs->gmm->numComponents, 
+		sargs->logGamma
+	);
 }
 
 void* parallelFitStart(void* untypedArgs) {
@@ -81,13 +62,13 @@ void* parallelFitStart(void* untypedArgs) {
 		// --- E-Step ---
 
 		// Compute gamma
-		for(size_t k = args->componentStart; k < args->componentEnd; ++k) {
-			logMvNormDist(
-				& sargs->gmm->components[k], pointDim,
-				X, numPoints, 
-				& loggamma[k * numPoints]
-			);
-		}
+		calcLogMvNorm(
+			sargs->gmm->components, numComponents, 
+			args->componentStart, args->componentEnd, 
+			X, numPoints, pointDim,
+			loggamma
+		);
+
 
 		arriveAt(sargs->barrier, sargs, checkStopCriteria);
 		if(!sargs->shouldContinue) {
@@ -97,102 +78,31 @@ void* parallelFitStart(void* untypedArgs) {
 		// Parallelism here is ugly since it's spread across points instead of 
 		// components like everything else. Ugly cache behavior on 
 		// gamm_{n, k} /= sum.
-		for (size_t point = args->pointStart; point < args->pointEnd; ++point) {
-			double maxArg = -INFINITY;
-			for (size_t k = 0; k < numComponents; ++k) {
-				const double arg = logpi[k] + loggamma[k * numPoints + point];
-				if(arg > maxArg) {
-					maxArg = arg;
-				}
-			}
-
-			// compute log p(x)
-			double sum = 0;
-			for(size_t k = 0; k < numComponents; ++k) {
-				const double arg = logpi[k] + loggamma[k * numPoints + point];
-				sum += exp(arg - maxArg);
-			}
-			assert(sum >= 0);
-
-			const double logpx = maxArg + log(sum);
-			for(size_t k = 0; k < numComponents; ++k) {
-				loggamma[k * numPoints + point] += -logpx;
-			}
-		}
+		calcLogGammaNK(
+			logpi, numComponents, 
+			args->pointStart, args->pointEnd, 
+			loggamma, numPoints
+		);
 
 		arriveAt(sargs->barrier, NULL, NULL);
 
 		// Afterwards, everybody does
-		for(size_t k = args->componentStart; k < args->componentEnd; ++k) {
-			double maxArg = -INFINITY;
-			for(size_t point = 0; point < numPoints; ++point) {
-				const double loggammank = loggamma[k * numPoints + point];
-				if(loggammank > maxArg) {
-					maxArg = loggammank;
-				}
-			}
-
-			double sum = 0;
-			for(size_t point = 0; point < numPoints; ++point) {
-				const double loggammank = loggamma[k * numPoints + point];
-				sum += exp(loggammank - maxArg);
-			}
-			assert(sum >= 0);
-
-			logGamma[k] = maxArg + log(sum);
-		}
-
-		// Using local sum to avoid multicore cache coherence overhead until we have to
+		calcLogGammaK(
+			loggamma, numPoints, 
+			args->componentStart, args->componentEnd, 
+			logGamma, numComponents
+		);
 
 		arriveAt(sargs->barrier, sargs, computeGammaSum);
 
 		// --- M-Step ---
-		for(size_t k = args->componentStart; k < args->componentEnd; ++k) {
-			struct Component* component = & sargs->gmm->components[k];
-
-			// Update pi
-			logpi[k] += logGamma[k] - sargs->logGammaSum;
-			component->pi = exp(logpi[k]);
-			assert(0 <= component->pi && component->pi <= 1);
-	
-			// Update mu
-			memset(component->mu, 0, pointDim * sizeof(double));
-			for (size_t point = 0; point < numPoints; ++point) {
-				for (size_t dim = 0; dim < pointDim; ++dim) {
-					component->mu[dim] += exp(loggamma[k * numPoints + point]) * X[point * pointDim + dim];
-				}
-			}
-
-			for (size_t i = 0; i < pointDim; ++i) {
-				component->mu[i] /= exp(logGamma[k]);
-			}
-
-			// Update sigma
-			memset(component->sigma, 0, pointDim * pointDim * sizeof(double));
-			for (size_t point = 0; point < numPoints; ++point) {
-				// (x - m)
-				for (size_t dim = 0; dim < pointDim; ++dim) {
-					xm[dim] = X[point * pointDim + dim] - component->mu[dim];
-				}
-
-				// (x - m) (x - m)^T
-				for (size_t row = 0; row < pointDim; ++row) {
-					for (size_t column = 0; column < pointDim; ++column) {
-						outerProduct[row * pointDim + column] = xm[row] * xm[column];
-					}
-				}
-
-				for (size_t i = 0; i < pointDim * pointDim; ++i) {
-					component->sigma[i] += exp(loggamma[k * numPoints + point]) * outerProduct[i];
-				}
-			}
-
-			for (size_t i = 0; i < pointDim * pointDim; ++i) {
-				component->sigma[i] /= exp(logGamma[k]);
-			}
-		
-			prepareCovariance(component, pointDim);
-		}
+		performMStep(
+			sargs->gmm->components, numComponents,
+			args->componentStart, args->componentEnd,
+			logpi, loggamma, logGamma, sargs->logGammaSum,
+			X, numPoints, pointDim,
+			outerProduct, xm
+		);
 
 	} while (1 == 1);
 

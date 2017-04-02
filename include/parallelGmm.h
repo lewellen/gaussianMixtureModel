@@ -21,9 +21,10 @@ struct SharedThreadStartArgs {
 
 	int shouldContinue;
 
-	double* gamma;
-	double* Gamma;
-	double GammaSum;
+	double* logpi;
+	double* loggamma;
+	double* logGamma;
+	double logGammaSum;
 
 	struct Barrier* barrier;
 };

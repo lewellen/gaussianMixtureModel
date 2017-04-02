@@ -14,7 +14,10 @@ void checkStopCriteria(void* untypedArgs) {
 	assert(sargs != NULL);
 
 	sargs->prevLogL = sargs->currentLogL;
-	sargs->currentLogL = logLikelihood(sargs->gmm, sargs->gamma, sargs->numPoints);
+	sargs->currentLogL = logLikelihood(
+		sargs->logpi, sargs->gmm->numComponents,
+		sargs->loggamma, sargs->numPoints
+	);
 
 	assert(sargs->maxIterations > 0);
 	if(--sargs->maxIterations == 0) {
@@ -33,10 +36,26 @@ void computeGammaSum(void* untypedArgs) {
 	struct SharedThreadStartArgs* sargs = (struct SharedThreadStartArgs*) untypedArgs;
 	assert(sargs != NULL);
 
-	sargs->GammaSum = 0;
-	for (size_t k = 0; k < sargs->gmm->numComponents; ++k) {
-		sargs->GammaSum += sargs->gmm->components[k].pi * sargs->Gamma[k];
+	const size_t numComponents = sargs->gmm->numComponents;
+	const double* logpi = sargs->logpi;
+	const double* logGamma = sargs->logGamma;
+
+	double maxArg = -INFINITY;
+	for(size_t k = 0; k < numComponents; ++k) {
+		const double arg = logpi[k] + logGamma[k];
+		if(arg > maxArg) {
+			maxArg = arg;
+		}
 	}
+
+	double sum = 0;
+	for (size_t k = 0; k < numComponents; ++k) {
+		const double arg = logpi[k] + logGamma[k];
+		sum += exp(arg - maxArg);
+	}
+	assert(sum >= 0);
+
+	sargs->logGammaSum = maxArg + log(sum);
 }
 
 void* parallelFitStart(void* untypedArgs) {
@@ -44,8 +63,16 @@ void* parallelFitStart(void* untypedArgs) {
 	assert(args != NULL);
 
 	struct SharedThreadStartArgs* sargs = args->shared;
+
+	const size_t numComponents = sargs->gmm->numComponents;
+
+	const double* X = sargs->X;
 	const size_t numPoints = sargs->numPoints;
 	const size_t pointDim = sargs->pointDim;
+
+	double* logpi = sargs->logpi;
+	double* loggamma = sargs->loggamma;
+	double* logGamma = sargs->logGamma;
 
 	double* xm = (double*)checkedCalloc(pointDim, sizeof(double));
 	double* outerProduct = (double*)checkedCalloc(pointDim * pointDim, sizeof(double));
@@ -55,10 +82,10 @@ void* parallelFitStart(void* untypedArgs) {
 
 		// Compute gamma
 		for(size_t k = args->componentStart; k < args->componentEnd; ++k) {
-			mvNormDist(
-				& sargs->gmm->components[k], sargs->pointDim, 
-				sargs->X, numPoints, 
-				& sargs->gamma[k * numPoints]
+			logMvNormDist(
+				& sargs->gmm->components[k], pointDim,
+				X, numPoints, 
+				& loggamma[k * numPoints]
 			);
 		}
 
@@ -71,15 +98,25 @@ void* parallelFitStart(void* untypedArgs) {
 		// components like everything else. Ugly cache behavior on 
 		// gamm_{n, k} /= sum.
 		for (size_t point = args->pointStart; point < args->pointEnd; ++point) {
-			double sum = 0.0;
-			for (size_t k = 0; k < sargs->gmm->numComponents; ++k) {
-				sum += sargs->gmm->components[k].pi * sargs->gamma[k * numPoints + point];
+			double maxArg = -INFINITY;
+			for (size_t k = 0; k < numComponents; ++k) {
+				const double arg = logpi[k] + loggamma[k * numPoints + point];
+				if(arg > maxArg) {
+					maxArg = arg;
+				}
 			}
 
-			if (sum > sargs->tolerance) {
-				for (size_t k = 0; k < sargs->gmm->numComponents; ++k) {
-					sargs->gamma[k * numPoints + point] /= sum;
-				}
+			// compute log p(x)
+			double sum = 0;
+			for(size_t k = 0; k < numComponents; ++k) {
+				const double arg = logpi[k] + loggamma[k * numPoints + point];
+				sum += exp(arg - maxArg);
+			}
+			assert(sum >= 0);
+
+			const double logpx = maxArg + log(sum);
+			for(size_t k = 0; k < numComponents; ++k) {
+				loggamma[k * numPoints + point] += -logpx;
 			}
 		}
 
@@ -87,11 +124,22 @@ void* parallelFitStart(void* untypedArgs) {
 
 		// Afterwards, everybody does
 		for(size_t k = args->componentStart; k < args->componentEnd; ++k) {
-			double GammaK = 0;
-			for (size_t point = 0; point < numPoints; ++point) {
-				GammaK += sargs->gamma[k * numPoints + point];
+			double maxArg = -INFINITY;
+			for(size_t point = 0; point < numPoints; ++point) {
+				const double loggammank = loggamma[k * numPoints + point];
+				if(loggammank > maxArg) {
+					maxArg = loggammank;
+				}
 			}
-			sargs->Gamma[k] = GammaK;
+
+			double sum = 0;
+			for(size_t point = 0; point < numPoints; ++point) {
+				const double loggammank = loggamma[k * numPoints + point];
+				sum += exp(loggammank - maxArg);
+			}
+			assert(sum >= 0);
+
+			logGamma[k] = maxArg + log(sum);
 		}
 
 		// Using local sum to avoid multicore cache coherence overhead until we have to
@@ -103,18 +151,20 @@ void* parallelFitStart(void* untypedArgs) {
 			struct Component* component = & sargs->gmm->components[k];
 
 			// Update pi
-			component->pi *= sargs->Gamma[k] / sargs->GammaSum;
-			
+			logpi[k] += logGamma[k] - sargs->logGammaSum;
+			component->pi = exp(logpi[k]);
+			assert(0 <= component->pi && component->pi <= 1);
+	
 			// Update mu
 			memset(component->mu, 0, pointDim * sizeof(double));
 			for (size_t point = 0; point < numPoints; ++point) {
 				for (size_t dim = 0; dim < pointDim; ++dim) {
-					component->mu[dim] += sargs->gamma[k * numPoints + point] * sargs->X[point * pointDim + dim];
+					component->mu[dim] += exp(loggamma[k * numPoints + point]) * X[point * pointDim + dim];
 				}
 			}
 
 			for (size_t i = 0; i < pointDim; ++i) {
-				component->mu[i] /= sargs->Gamma[k];
+				component->mu[i] /= exp(logGamma[k]);
 			}
 
 			// Update sigma
@@ -122,7 +172,7 @@ void* parallelFitStart(void* untypedArgs) {
 			for (size_t point = 0; point < numPoints; ++point) {
 				// (x - m)
 				for (size_t dim = 0; dim < pointDim; ++dim) {
-					xm[dim] = sargs->X[point * pointDim + dim] - component->mu[dim];
+					xm[dim] = X[point * pointDim + dim] - component->mu[dim];
 				}
 
 				// (x - m) (x - m)^T
@@ -133,12 +183,12 @@ void* parallelFitStart(void* untypedArgs) {
 				}
 
 				for (size_t i = 0; i < pointDim * pointDim; ++i) {
-					component->sigma[i] += sargs->gamma[k * numPoints + point] * outerProduct[i];
+					component->sigma[i] += exp(loggamma[k * numPoints + point]) * outerProduct[i];
 				}
 			}
 
 			for (size_t i = 0; i < pointDim * pointDim; ++i) {
-				component->sigma[i] /= sargs->Gamma[k];
+				component->sigma[i] /= exp(logGamma[k]);
 			}
 		
 			prepareCovariance(component, pointDim);
@@ -188,10 +238,17 @@ struct GMM* parallelFit(
 	stsa.maxIterations = 100;
 	stsa.prevLogL = -INFINITY;
 	stsa.currentLogL = -INFINITY;
-	stsa.gamma = (double*)checkedCalloc(numComponents * numPoints, sizeof(double));
-	stsa.Gamma = (double*)checkedCalloc(numComponents, sizeof(double));
-	stsa.GammaSum = 0.0;
+	stsa.logpi = (double*)checkedCalloc(numComponents, sizeof(double));
+	stsa.loggamma = (double*)checkedCalloc(numComponents * numPoints, sizeof(double));
+	stsa.logGamma = (double*)checkedCalloc(numComponents, sizeof(double));
+	stsa.logGammaSum = 0.0;
 	stsa.barrier = &barrier;
+
+	for(size_t k = 0; k < numComponents; ++k) {
+		const double pik = gmm->components[k].pi;
+		assert(pik >= 0);
+		stsa.logpi[k] = log(pik);
+	}
 
 	size_t pointResidual = numPoints % numProcessors;
 	size_t pointsPerProcessor = (numPoints - pointResidual) / numProcessors;
@@ -248,8 +305,9 @@ struct GMM* parallelFit(
 
 	destroyBarrier(&barrier);
 
-	free(stsa.gamma);
-	free(stsa.Gamma);
+	free(stsa.logpi);
+	free(stsa.loggamma);
+	free(stsa.logGamma);
 
 	return gmm;
 }

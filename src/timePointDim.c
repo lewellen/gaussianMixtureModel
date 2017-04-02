@@ -33,10 +33,10 @@ int main(int argc, char** argv) {
 			double seqElapsedSec = calcElapsedSec(&start, &end);
 
 
-/*			gettimeofday(&start, NULL);
+			gettimeofday(&start, NULL);
 			freeGMM(parallelFit(X, numPoints, pointDim, numComponents));
 			gettimeofday(&end, NULL);
-*/			double parallelElapsedSec =0;// calcElapsedSec(&start, &end);
+			double parallelElapsedSec = calcElapsedSec(&start, &end);
 
 			fprintf(stdout, "%zu %zu %zu %f %f\n", 
 				numPoints, numComponents, pointDim, seqElapsedSec, parallelElapsedSec);

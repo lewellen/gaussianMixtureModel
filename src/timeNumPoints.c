@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-
-#include <sys/time.h>
+#include <time.h>
 
 #include "gmm.h"
 #include "seqGmm.h"
@@ -12,7 +11,7 @@ int main(int argc, char** argv) {
 	srand(time(NULL));
 
 	const size_t minNumPoints = 128;
-	const size_t maxNumPoints = 1048578;
+	const size_t maxNumPoints = 262144;
 
 	const size_t numComponents = 8;
 	const size_t pointDim = 2;

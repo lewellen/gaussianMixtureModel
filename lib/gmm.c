@@ -137,9 +137,10 @@ int shouldContinue(
 		return 0;
 	}
 
-	if(maxIterations >= 80) {
-		// assumes maxIterations = 100, so we always do atleast 20 iterations
-		return 1;
+	// In principle this shouldn't happen, but if it does going to assume we're in
+	// an odd state and that we should terminate.
+	if(currentLogL < prevLogL) {
+		return 0;
 	}
 
 	if(fabs(currentLogL - prevLogL) < tolerance ) {
@@ -342,8 +343,13 @@ double* generateGmmData(
 	// computationally more efficient.)
 	double pi[numComponents];
 	double piSum = 0;
+
+	double limit = 2.0 * numComponents / (double) numPoints;
+
 	for(size_t i = 0; i < numComponents; ++i) {
-		pi[i] = rand() / (double) RAND_MAX;
+		do {
+			pi[i] = rand() / (double) RAND_MAX;
+		} while (pi[i] < limit);
 		piSum += pi[i];
 	}
 
@@ -366,8 +372,8 @@ double* generateGmmData(
 			mean[i] = 20 * sampleStandardNormal();
 		}
 
-		// Select component covariance
-		const size_t dof = (pointDim + 2) + (rand() % 20);
+		// Select component covariance (dof is just a heuristic)
+		const size_t dof = pointDim + 1 + (size_t) sqrt(0.25 * numPoints);
 		double* covL = sampleWishartCholesky(pointDim, dof);
 
 		// Sample points from component proportional to component mixture coefficient

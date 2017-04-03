@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-
-#include <sys/time.h>
+#include <time.h>
 
 #include "gmm.h"
 #include "seqGmm.h"
@@ -9,24 +8,23 @@
 #include "util.h"
 
 int main(int argc, char** argv) {
+	srand(time(NULL));
+
 	const size_t minPointDim = 1;
 	const size_t maxPointDim = 64;
 
-	const size_t numPoints = 1024;
-	const size_t numComponents = 1;
+	const size_t numPoints = 4096;
+	const size_t numComponents = 8;
 
-	const size_t numSamples = 10;
-
-	double* X = (double*) malloc(numPoints * maxPointDim * sizeof(double));
-	for(size_t i = 0; i < numPoints * maxPointDim; ++i) {
-		X[i] = rand() / (double)RAND_MAX;
-	}
+	const size_t numSamples = 1;
 
 	struct timeval start, end;
 
 	fprintf(stdout, "#numPoints numComponents pointDim seqElapsedSec parallelElapsedSec\n");
 	for(size_t sample = 0; sample < numSamples; ++sample) {	
-		for(size_t pointDim = minPointDim; pointDim < maxPointDim; pointDim += 1) {
+		for(size_t pointDim = minPointDim; pointDim < maxPointDim; pointDim *= 2) {
+			double* X = generateGmmData(numPoints, pointDim, numComponents);
+
 			gettimeofday(&start, NULL);
 			freeGMM(fit(X, numPoints, pointDim, numComponents));
 			gettimeofday(&end, NULL);
@@ -40,10 +38,10 @@ int main(int argc, char** argv) {
 
 			fprintf(stdout, "%zu %zu %zu %f %f\n", 
 				numPoints, numComponents, pointDim, seqElapsedSec, parallelElapsedSec);
+
+			free(X);
 		}
 	}
-
-	free(X);
 
 	return EXIT_SUCCESS;
 }

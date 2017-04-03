@@ -30,9 +30,11 @@ void calcLogMvNorm(
 	double* logProb
 );
 
-double logLikelihood(
+void logLikelihood(
 	const double* logpi, const size_t numComponents,
-	const double* logProb, const size_t numPoints
+	const double* logProb, const size_t numPoints,
+	const size_t pointStart, const size_t pointEnd,
+	double* logL
 );
 
 int shouldContinue(
@@ -64,6 +66,10 @@ void performMStep(
 	double* logpi, double* loggamma, double* logGamma, const double logGammaSum,
 	const double* X, const size_t numPoints, const size_t pointDim,
 	double* outerProduct, double* xm
+);
+
+double* generateGmmData(
+	const size_t numPoints, const size_t pointDim, const size_t numComponents
 );
 
 #endif

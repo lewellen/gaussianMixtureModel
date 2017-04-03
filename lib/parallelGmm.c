@@ -14,10 +14,10 @@ void checkStopCriteria(void* untypedArgs) {
 	assert(sargs != NULL);
 
 	sargs->prevLogL = sargs->currentLogL;
-	sargs->currentLogL = logLikelihood(
-		sargs->logpi, sargs->gmm->numComponents,
-		sargs->loggamma, sargs->numPoints
-	);
+	sargs->currentLogL = 0;
+	for(size_t i = 0; i < sargs->numProcesses; ++i) {
+		sargs->currentLogL += sargs->logLK[i];
+	}
 
 	assert(sargs->maxIterations > 0);
 	--sargs->maxIterations;
@@ -61,7 +61,7 @@ void* parallelFitStart(void* untypedArgs) {
 	do {
 		// --- E-Step ---
 
-		// Compute gamma
+		// Compute gamma (parallel across components)
 		calcLogMvNorm(
 			sargs->gmm->components, numComponents, 
 			args->componentStart, args->componentEnd, 
@@ -69,8 +69,18 @@ void* parallelFitStart(void* untypedArgs) {
 			loggamma
 		);
 
+		arriveAt(sargs->barrier, NULL, NULL);
+
+		// parallel across points
+		logLikelihood(
+			logpi, numComponents,
+			loggamma, numPoints,
+			args->pointStart, args->pointEnd,
+			& sargs->logLK[args->id]
+		);
 
 		arriveAt(sargs->barrier, sargs, checkStopCriteria);
+
 		if(!sargs->shouldContinue) {
 			break;
 		}
@@ -152,6 +162,8 @@ struct GMM* parallelFit(
 	stsa.loggamma = (double*)checkedCalloc(numComponents * numPoints, sizeof(double));
 	stsa.logGamma = (double*)checkedCalloc(numComponents, sizeof(double));
 	stsa.logGammaSum = 0.0;
+	stsa.logLK = (double*)checkedCalloc(numProcessors, sizeof(double));
+	stsa.numProcesses = numProcessors;
 	stsa.barrier = &barrier;
 
 	for(size_t k = 0; k < numComponents; ++k) {
@@ -218,6 +230,7 @@ struct GMM* parallelFit(
 	free(stsa.logpi);
 	free(stsa.loggamma);
 	free(stsa.logGamma);
+	free(stsa.logLK);
 
 	return gmm;
 }

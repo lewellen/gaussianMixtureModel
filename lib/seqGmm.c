@@ -53,9 +53,11 @@ struct GMM* fit(
 		// since likelihood determines termination. Result: 1.3x improvement in 
 		// execution time.  (~8 ms to ~6 ms on oldFaithful.dat)
 		prevLogL = currentLogL;
-		currentLogL = logLikelihood(
+		 logLikelihood(
 			logpi, numComponents, 
-			loggamma, numPoints
+			loggamma, numPoints,
+			0, numPoints,
+			& currentLogL
 		)
 ;
 		assert(maxIterations > 0);

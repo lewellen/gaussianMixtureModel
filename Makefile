@@ -3,7 +3,7 @@ bins = $(patsubst src/%.c, bin/%, $(wildcard src/*.c))
 figs = $(patsubst doc/%.gpi, obj/%.tex, $(wildcard doc/*.gpi))
 
 ccTool = gcc
-ccFlags = -O3 -Wall -std=iso9899:1999
+ccFlags = -g -Wall -std=iso9899:1999
 ccLibs = -lm -pthread
 
 .PHONY: all clean

@@ -32,4 +32,14 @@ void logMvNormDist(
 	double* logProb
 ); 
 
+double sampleStandardNormal();
+
+double* sampleWishart(
+	const size_t dimension, const size_t degreeFreedom
+);
+
+double* sampleWishartCholesky(
+	const size_t dimension, const size_t degreeFreedom
+);
+
 #endif

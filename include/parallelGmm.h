@@ -26,6 +26,9 @@ struct SharedThreadStartArgs {
 	double* logGamma;
 	double logGammaSum;
 
+	double* logLK;
+	size_t numProcesses;
+
 	struct Barrier* barrier;
 };
 

@@ -7,6 +7,7 @@
 
 #include "component.h"
 #include "linearAlgebra.h"
+#include "util.h"
 
 #ifndef PI
 #define PI 3.141592653589793238
@@ -94,7 +95,7 @@ void logMvNormDist(
 	}
 
 	// Sigma SXM = XM => Sigma^{-} XM = SXM
-	solvePositiveSemidefinite(
+	solvePositiveDefinite(
 		component->sigmaL, 
 		XM, 
 		SXM,
@@ -119,4 +120,126 @@ void logMvNormDist(
 	free(XM);
 	free(SXM);
 	free(innerProduct);
+}
+
+double sampleStandardNormal() {
+	// Ratio-of-uniforms method
+	// Computer Generation of Random Variables using the Ratio of Uniform Deviates
+	// Kinderman, Monahan 1977
+
+	static const double d = +0.857763884960707; // sqrt(2.0 * exp(-1));
+
+	double u1 = 0, v2 = 0, u2 = 0, x = 0;	
+	do {
+		u1 = rand() / (double)RAND_MAX;
+		v2 = rand() / (double)RAND_MAX;
+		u2 = (2.0 * v2 - 1.0) * d;
+		x = u2 / u1;
+	} while ( u1 * u1 > exp(-0.5 * x * x) );
+
+	return x;
+}
+
+double* sampleWishart(const size_t dimension, const size_t degreeFreedom) {
+	// Section 3, Wishart Distributions and Inverse-Wishart Sampling S. Sawyer
+
+	// A numerical procedure to generate a sample covariance matrix
+	// Odell, Feiveson, 1966
+	assert(dimension > 0);
+	assert(degreeFreedom > dimension + 1);
+
+	double V[dimension];
+	for(size_t i = 0; i < dimension; ++i) {
+		// V_{i} is sampled from a chi-square distribution with n - i + 1 degrees of 
+		// freedom.
+		V[i] = 0;
+		for(size_t j = 0; j <= degreeFreedom - i; ++j) {
+			const double x = sampleStandardNormal();
+			V[i] += x * x;
+		}
+	}
+
+	double N[dimension * dimension];
+	for(size_t i = 0; i < dimension; ++i) {
+		const size_t ii = i * dimension + i;
+		N[ii] = 0;
+
+		for(size_t j = 0; j < i; ++j) {
+			// N_{i,j} sampled from a standard normal distribution
+			const size_t ij = i * dimension + j;
+			const size_t ji = j * dimension + i;
+			N[ij] = sampleStandardNormal();
+			N[ji] = N[ij];
+		}
+	}
+
+	double* W = (double*)checkedCalloc(dimension*dimension, sizeof(double));
+	W[0] = V[0];
+	for(size_t i = 1; i < dimension; ++i) {
+		const size_t ii = i * dimension + i;
+		for(size_t r = 0; r <= i - 1; ++r) {
+			const size_t ri = r * dimension + i;
+			const double nri = N[ri];
+			W[ii] += nri * nri;
+		}
+	}
+
+	for(size_t i = 0; i < dimension; ++i) {
+		assert(V[i] > 0);
+		V[i] = sqrt(V[i]);
+	}
+
+	for(size_t i = 1; i < dimension; ++i) {
+		for(size_t j = 0; j < i; ++j) {
+			const size_t ij = i * dimension + j;
+			const size_t ji = j * dimension + i;
+
+			W[ij] = N[ij] * V[i];
+
+			// TODO: Figure out how Odell/Feiveson factored this out to ensure O(d^2).
+			if(i > 0) {
+				for(size_t r = 0; r <= i - 1; ++r) {
+					const size_t ri = r * dimension + i;
+					const size_t rj = r * dimension + j;
+					W[ij] += N[ri] * N[rj];
+				}
+			}
+
+			W[ji] = W[ij];
+		}
+	}
+
+	return W;
+}
+
+double* sampleWishartCholesky(const size_t dimension, const size_t degreeFreedom) {
+	// Eqn (3.2) Wishart Distributions and Inverse-Wishart Sampling S. Sawyer
+
+	assert(dimension > 0);
+	assert(degreeFreedom > dimension + 1);
+
+	double V[dimension];
+	for(size_t i = 0; i < dimension; ++i) {
+		// V_{i} is sampled from a chi-square distribution with n - i + 1 degrees of 
+		// freedom.
+		V[i] = 0;
+		for(size_t j = 0; j <= degreeFreedom - i; ++j) {
+			const double x = sampleStandardNormal();
+			V[i] += x * x;
+		}
+	}
+
+	double* L = (double*)checkedCalloc(dimension * dimension, sizeof(double));
+	for(size_t i = 0; i < dimension; ++i) {
+		const size_t ii = i * dimension + i;
+		L[ii] = sqrt(V[i]);
+
+		for(size_t j = 0; j < i; ++j) {
+			// N_{i,j} sampled from a standard normal distribution
+			const size_t ij = i * dimension + j;
+			L[ij] = sampleStandardNormal();
+		}
+	}
+
+	return L;
 }

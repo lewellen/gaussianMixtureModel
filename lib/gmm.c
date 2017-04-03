@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "gmm.h"
+#include "linearAlgebra.h"
 #include "util.h"
 
 struct GMM* initGMM(
@@ -92,17 +93,22 @@ void calcLogMvNorm(
 	}
 }
 
-double logLikelihood(
+void logLikelihood(
 	const double* logpi, const size_t numComponents,
-	const double* logProb, const size_t numPoints
+	const double* logProb, const size_t numPoints,
+	const size_t pointStart, const size_t pointEnd,
+	double* logL
 ) { 
 	assert(logpi != NULL);
 	assert(numComponents > 0);
 	assert(logProb != NULL);
 	assert(numPoints > 0);
+	assert(pointStart < pointEnd);
+	assert(pointEnd <= numPoints);
+	assert(logL != NULL);
 
-	double logL = 0.0;
-	for (size_t point = 0; point < numPoints; ++point) {
+	*logL = 0.0;
+	for (size_t point = pointStart; point < pointEnd; ++point) {
 		double maxArg = -INFINITY;
 		for(size_t k = 0; k < numComponents; ++k) {
 			const double logProbK = logpi[k] + logProb[k * numPoints + point];
@@ -118,10 +124,8 @@ double logLikelihood(
 		}
 
 		assert(sum >= 0);
-		logL += maxArg + log(sum);
+		*logL += maxArg + log(sum);
 	}
-
-	return logL;
 }
 
 int shouldContinue(
@@ -327,4 +331,61 @@ void performMStep(
 	
 		prepareCovariance(component, pointDim);
 	}
+}
+
+double* generateGmmData(
+	const size_t numPoints, const size_t pointDim, const size_t numComponents
+) {
+	double* X = (double*)checkedCalloc(numPoints * pointDim, sizeof(double));
+
+	// Select mixture coefficients (could sample this from Dirichlet, but this is 
+	// computationally more efficient.)
+	double pi[numComponents];
+	double piSum = 0;
+	for(size_t i = 0; i < numComponents; ++i) {
+		pi[i] = rand() / (double) RAND_MAX;
+		piSum += pi[i];
+	}
+
+	for(size_t i = 0; i < numComponents; ++i) {
+		pi[i] /= piSum;
+	}
+
+	size_t pointsPerComponent[numComponents];
+	for(size_t i = 0; i < numComponents; ++i) {
+		pointsPerComponent[i] = (size_t)round(pi[i]*numPoints);
+	}
+
+	double covLx[pointDim];
+	double mean[pointDim];
+
+	size_t xi = 0;
+	for(size_t k = 0; k < numComponents && xi < numPoints; ++k) {
+		// Select component mean
+		for(size_t i = 0; i < pointDim; ++i) {
+			mean[i] = 20 * sampleStandardNormal();
+		}
+
+		// Select component covariance
+		const size_t dof = (pointDim + 2) + (rand() % 20);
+		double* covL = sampleWishartCholesky(pointDim, dof);
+
+		// Sample points from component proportional to component mixture coefficient
+		for(size_t i = 0; i < pointsPerComponent[k] && xi < numPoints; ++i) {
+			double* x = & X[xi * pointDim];
+			for(size_t d = 0; d < pointDim; ++d) {
+				x[d] = sampleStandardNormal();
+			}
+
+			lowerDiagByVector(covL, x, covLx, pointDim);
+			vectorAdd(mean, covLx, x, pointDim);
+			++xi;
+		}
+
+		free(covL);
+	}
+
+	// TODO: shuffle
+
+	return X;
 }

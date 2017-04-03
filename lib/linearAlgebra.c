@@ -39,11 +39,22 @@ void choleskyDecomposition(const double* A, const size_t pointDim, double* L) {
 	for (size_t k = 0; k < pointDim; ++k) {
 		double sum = 0;
 		for (int s = 0; s < k; ++s) {
-			sum += L[k*pointDim+s] * L[k*pointDim+s];
+			const double l = L[k * pointDim + s];
+			const double ll = l * l;
+			assert(ll == ll);
+			assert(ll != -INFINITY);
+			assert(ll != INFINITY);
+			assert(ll >= 0);
+			sum += ll;
 		}
+	
+		assert(sum == sum);
+		assert(sum != -INFINITY);
+		assert(sum != INFINITY);
+		assert(sum >= 0);
 
 		sum = A[k * pointDim + k] - sum;
-		if (sum <= 0) {
+		if (sum <= DBL_EPSILON) {
 			fprintf(stdout, "A:\n");
 			for(size_t i = 0; i < pointDim; ++i) {
 				for(size_t j = 0; j < pointDim; ++j) {
@@ -53,7 +64,7 @@ void choleskyDecomposition(const double* A, const size_t pointDim, double* L) {
 			}
 
 			// If this happens then we are not positive definite.
-			fprintf(stdout, "A must be positive definite.\n");
+			fprintf(stdout, "A must be positive definite. (sum = %E)\n", sum);
 			assert(sum > 0);
 			break;
 		}
@@ -69,7 +80,7 @@ void choleskyDecomposition(const double* A, const size_t pointDim, double* L) {
 	}
 }
 
-void solvePositiveSemidefinite(const double* L, const double* B, double* X, const size_t pointDim, const size_t numPoints) {
+void solvePositiveDefinite(const double* L, const double* B, double* X, const size_t pointDim, const size_t numPoints) {
 	// Want to solve the system given by: L(L^T)X = B where:
 	// 	L: pointDim x pointDim lower diagonal matrix
 	//	X: pointDim x numPoints unknown
@@ -144,4 +155,40 @@ void solvePositiveSemidefinite(const double* L, const double* B, double* X, cons
 	free(LF);
 	free(LB);
 	free(Z);
+}
+
+void lowerDiagByVector(
+	const double* L,
+	const double* x,
+	double* b,
+	const size_t n
+) {
+	assert(L != NULL);
+	assert(x != NULL);
+	assert(b != NULL);
+	assert(x != b);
+	assert(n > 0);
+
+	for(size_t row = 0; row < n; ++row) {
+		b[row] = 0;
+		for(size_t col = 0; col <= row; ++col) {
+			b[row] = L[row * n + col] * x[row];
+		}
+	}
+}
+
+void vectorAdd(
+	const double* a,
+	const double* b,
+	double* c,
+	const size_t n
+) {
+	assert(a != NULL);
+	assert(b != NULL);
+	assert(c != NULL);
+	assert(n > 0);
+
+	for(size_t i = 0; i < n; ++i) {
+		c[i] = a[i] + b[i];
+	}
 }

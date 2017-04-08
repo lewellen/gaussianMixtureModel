@@ -177,6 +177,8 @@ void testParallelSum() {
 
 int main(int argc, char** argv) {
 	testParallelSum();
+
+	printf("PASS: %s\n", argv[0]);
 	return EXIT_SUCCESS;
 }
 

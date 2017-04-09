@@ -1,0 +1,35 @@
+#ifndef CUDAKERNALS_H
+#define CUDAKERNALS_H
+
+#include <stdlib.h>
+
+__host__ void calcDim(int N, cudaDeviceProp* devProp, dim3* block, dim3* grid);
+
+__host__ void dimToConsole(dim3* block, dim3* grid);
+
+__host__ void assertPowerOfTwo(size_t N);
+
+__global__ void cudaGmmLogLikelihood(
+	const size_t numPoints, const size_t numComponents,
+	const double* logpi, double* logProb
+); 
+
+__device__ void devVecMinus(const size_t N, double* x, double* y); 
+
+__device__ void devSolveLowerTri(const size_t N, double* L, double* x, double* b); 
+
+__device__ void devSolveLowerTriT(const size_t N, double* L, double* x, double* b); 
+
+__device__ double devVecDot(const size_t N, double* x, double* y); 
+
+__global__ void cudaLogMVNormDist(
+	const size_t numPoints, const size_t pointDim, 
+	double* X, double* mu, double* sigmaL, double logNormalizer,
+	double* dest
+);
+ 
+__global__ void cudaSum(int N, double* dest, double* src);
+
+__global__ void cudaReduceBlocks(double* dest);
+
+#endif

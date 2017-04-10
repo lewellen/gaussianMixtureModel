@@ -1,0 +1,34 @@
+#ifndef CUDAMVNORMAL_HU
+#define CUDAMVNORMAL_HU
+
+#include <stdlib.h>
+
+__device__ double devVecDot(const size_t N, const double* x, const double* y);
+
+__device__ void devVecMinus(const size_t N, double* z, double* x, const double* y);
+
+__device__ void devSolveLowerTri(const size_t N, const double* L, double* x, const double* b);
+
+__device__ void devSolveLowerTriT(const size_t N, const double* L, double* x, const double* b);
+
+__device__ double devLogMVNormNormalizer(const size_t pointDim, const double* sigmaL);
+
+__device__ double devLogMVNormDist(
+	const size_t pointDim,
+	const double* x, const double* mu, const double* sigmaL,
+	double* u, double* v
+);
+
+__global__ void kernLogMVNormDist(
+	const size_t numPoints, const size_t pointDim, 
+	const double* X, double* mu, double* sigmaL,
+	double* logProb
+);
+
+__global__ void kernGmmLogLikelihood(
+	const size_t numPoints, const size_t numComponents,
+	const double* logPi, const double* logP,
+	double* logL
+);
+
+#endif

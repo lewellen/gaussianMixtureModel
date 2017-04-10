@@ -5,7 +5,7 @@ bins = $(patsubst src/%.c, bin/%, $(wildcard src/*.c))
 figs = $(patsubst doc/%.gpi, obj/%.tex, $(wildcard doc/*.gpi))
 
 ccTool = gcc
-ccFlags = -O3 -Wall -std=iso9899:1999
+ccFlags = -g -Wall -std=iso9899:1999
 
 # -lm for math
 # -rt for real time clock 
@@ -14,7 +14,7 @@ ccFlags = -O3 -Wall -std=iso9899:1999
 ccLibs = -L/usr/local/cuda/lib64 -lm -lrt -lpthread -lcuda -lcudart -lstdc++
 
 nvccTool = nvcc
-nvccFlags = -g 
+nvccFlags = -O3
 nvccLibs = 
 
 .PHONY: all clean

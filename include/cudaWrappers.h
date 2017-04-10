@@ -3,19 +3,19 @@
 
 #include <stdlib.h>
 
-extern void parallelGmmLogLikelihood(
-	const size_t numPoints, const size_t numComponents,
-	const double* logPi, double* logProb
-);
-
-extern void parallelLogMVNormDist(
+extern void gpuLogMVNormDist(
 	const size_t numPoints, const size_t pointDim,
 	const double* X, const double* mu, const double* sigmaL, const double logNormalizer,
 	double* logP
 );
 
-extern double parallelSum(
-	double* host_a, const size_t N
+extern double gpuGmmLogLikelihood(
+	const size_t numPoints, const size_t numComponents,
+	const double* logPi, const double* logP
+);
+
+extern double gpuSum(
+	const size_t N, double* a
 );
 
 #endif

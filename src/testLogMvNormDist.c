@@ -9,9 +9,12 @@
 #define M_PI 3.141592653589793238462643383279
 #endif
 
+#include "component.h"
 #include "cudaWrappers.h"
 
-void test1DStandardNormal() {
+typedef void (*test1DStandardNormalWrapper)(const size_t, const size_t, const double*, const double*, const double*, const double, double*);
+
+void test1DStandardNormal( test1DStandardNormalWrapper target ) {
 	const size_t pointDim = 1;
 	const size_t numPoints = 1024;
 
@@ -39,8 +42,8 @@ void test1DStandardNormal() {
 
 	double logP[numPoints];
 	memset(logP, 0, numPoints * sizeof(double));
-	
-	parallelLogMVNormDist(
+
+	target(
 		numPoints, pointDim,
 		X, mu, sigmaL, logNormalizer,
 		logP
@@ -62,9 +65,34 @@ void test1DStandardNormal() {
 	}
 }
 
-int main(int argc, char** argv) {
-	test1DStandardNormal();
+void cpuLogMvNormDistWrapper(
+	const size_t numPoints, const size_t pointDim, 
+	const double* X, const double* mu, const double* sigmaL, const double logNormalizer, 
+	double* logP
+) {
+	struct Component phi;
+	phi.mu = mu;
+	phi.sigmaL = sigmaL;
+	phi.normalizer = logNormalizer;
+	logMvNormDist(&phi, pointDim, X, numPoints, logP);
+}
 
-	printf("PASS %s\n", argv[0]);
+void gpuLogMvNormDistWrapper(
+	const size_t numPoints, const size_t pointDim, 
+	const double* X, const double* mu, const double* sigmaL, const double logNormalizer, 
+	double* logP
+) {
+	gpuLogMVNormDist(
+		numPoints, pointDim,
+		X, mu, sigmaL, logNormalizer,
+		logP
+	);
+}
+
+int main(int argc, char** argv) {
+	test1DStandardNormal(cpuLogMvNormDistWrapper);
+	test1DStandardNormal(gpuLogMvNormDistWrapper);
+
+	printf("PASS: %s\n", argv[0]);
 	return EXIT_SUCCESS;
 }

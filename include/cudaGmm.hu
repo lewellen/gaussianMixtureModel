@@ -1,0 +1,12 @@
+#ifndef CUDAGMM_HU
+#define CUDAGMM_HU
+
+#include <stdlib.h>
+
+__global__ void kernGmmLogLikelihood(
+	const size_t numPoints, const size_t numComponents,
+	const double* logPi, const double* logP,
+	double* logL
+);
+
+#endif

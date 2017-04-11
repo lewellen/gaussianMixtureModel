@@ -5,12 +5,17 @@
 
 #include <stdlib.h>
 
+__host__ void assertPowerOfTwo(size_t N);
+
 __host__ void calcDim(int N, cudaDeviceProp* devProp, dim3* block, dim3* grid);
 
 __host__ void dimToConsole(dim3* block, dim3* grid);
 
-__host__ void assertPowerOfTwo(size_t N);
+__host__ double* mallocOnGpu(const size_t N);
  
+__host__ double* sendToGpu(const size_t N, const double* A);
+
+
 __global__ void kernArraySum(int N, double* dest, double* src);
 
 __global__ void kernReduceBlocks(double* dest);

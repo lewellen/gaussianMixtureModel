@@ -59,11 +59,9 @@ struct GMM* cudaFit(
 		// since likelihood determines termination. Result: 1.3x improvement in 
 		// execution time.  (~8 ms to ~6 ms on oldFaithful.dat)
 		prevLogL = currentLogL;
-		logLikelihood(
-			logpi, numComponents, 
-			loggamma, numPoints,
-			0, numPoints,
-			& currentLogL
+		currentLogL = gpuGmmLogLikelihood(
+			numPoints, numComponents,
+			logpi, loggamma
 		);
 
 		assert(maxIterations > 0);

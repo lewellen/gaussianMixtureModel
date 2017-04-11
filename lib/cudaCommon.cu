@@ -4,6 +4,16 @@
 
 #include "cudaCommon.hu"
 
+__host__ void assertPowerOfTwo(size_t N) {
+	int bit = 0;
+	while(N > 0 && bit <= 1) {
+		bit += N & 1;
+		N >>= 1;
+	}
+
+	assert(bit <= 1);
+}
+
 __host__ void calcDim(int N, cudaDeviceProp* devProp, dim3* block, dim3* grid) {
 	assert(devProp != NULL);
 	assert(block != NULL);
@@ -48,13 +58,19 @@ __host__ void dimToConsole(dim3* block, dim3* grid) {
 	printf("grid: (%d, %d, %d)\n", grid->x, grid->y, grid->z);
 }
 
-__host__ void assertPowerOfTwo(size_t N) {
-	int bit = 0;
-	while(N > 0 && bit <= 1) {
-		bit += N & 1;
-		N >>= 1;
-	}
-	assert(bit <= 1);
+__host__ double* mallocOnGpu(const size_t N) {
+	double* device_A;
+	double ABytes = N * sizeof(double);
+	check(cudaMalloc(&device_A, ABytes));
+	return device_A;
+}
+
+__host__ double* sendToGpu(const size_t N, const double* A) {
+	double* device_A;
+	const size_t ABytes = N * sizeof(double);
+	check(cudaMalloc(&device_A, ABytes));
+	check(cudaMemcpy(device_A, A, ABytes, cudaMemcpyHostToDevice));
+	return device_A;
 }
 
 __global__ void kernArraySum(int N, double* dest, double* src) {
@@ -64,14 +80,20 @@ __global__ void kernArraySum(int N, double* dest, double* src) {
 	dest[i] += src[i];
 }
 
-__global__ void kernReduceBlocks(double* dest) {
+__global__ void kernReduceBlocks(const size_t N, double* dest) {
 	// Assumes a 2D grid of 1024x1 1D blocks
 	int b = blockIdx.y * gridDim.x + blockIdx.x;
 	int i = b * blockDim.x + threadIdx.x;
 
 	// Load into block shared memory
 	__shared__ double localSum[1024];
-	localSum[threadIdx.x] = dest[i];
+
+	if(threadIdx.x >= N) {
+		localSum[threadIdx.x] = 0;
+	} else {
+		localSum[threadIdx.x] = dest[i];
+	}
+
 	__syncthreads();	
 
 	// Do all the calculations in block shared memory instead of global memory.
@@ -87,21 +109,23 @@ __global__ void kernReduceBlocks(double* dest) {
 }
 
 __host__ double cudaReduceSum(cudaDeviceProp* deviceProp, const size_t N, double* device_A) {
+
 	// Parallel sum by continually folding the array in half and adding the right 
 	// half to the left half until the fold size is 1024 (single block), then let
 	// GPU reduce the remaining block to a single value and copy it over. O(log n).
 	if(N >= 1024) {
+		assertPowerOfTwo(N);
 		dim3 block, grid;
 		for(size_t n = N/2; n >= 1024; n /= 2) {
 			calcDim(n, deviceProp, &block, &grid);
 			kernArraySum<<<grid, block>>>(n, device_A, device_A + n);
 		}
-		kernReduceBlocks<<<1, 1024>>>(device_A);
-	} else {
-		kernReduceBlocks<<<1, N>>>(device_A);
 	}
+ 
+	kernReduceBlocks<<<1, 1024>>>(N, device_A);
 
 	double sum = 0;
 	check(cudaMemcpy(&sum, device_A, sizeof(double), cudaMemcpyDeviceToHost));
+	cudaDeviceSynchronize();
 	return sum;
 }

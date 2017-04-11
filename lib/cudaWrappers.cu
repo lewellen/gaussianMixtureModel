@@ -10,21 +10,6 @@
 #include "cudaMVNormal.hu"
 #include "cudaGmm.hu"
 
-double* mallocOnGpu(const size_t N) {
-	double* device_A;
-	double ABytes = N * sizeof(double);
-	check(cudaMalloc(&device_A, ABytes));
-	return device_A;
-}
-
-double* sendToGpu(const size_t N, const double* A) {
-	double* device_A;
-	const size_t ABytes = N * sizeof(double);
-	check(cudaMalloc(&device_A, ABytes));
-	check(cudaMemcpy(device_A, A, ABytes, cudaMemcpyHostToDevice));
-	return device_A;
-}
-
 extern "C" void gpuLogMVNormDist(
 	const size_t numPoints, const size_t pointDim,
 	const double* X, const double* mu, const double* sigmaL,
@@ -41,7 +26,8 @@ extern "C" void gpuLogMVNormDist(
 	double* device_sigmaL = sendToGpu(pointDim * pointDim, sigmaL);
 	double* device_logP = mallocOnGpu(numPoints);
 
-	kernLogMVNormDist<<<numPoints, 1>>>(
+	// TODO: calcDim...
+	kernLogMVNormDist<<<1, numPoints>>>(
 		numPoints, pointDim,
 		device_X, device_mu, device_sigmaL,
 		device_logP
@@ -73,11 +59,12 @@ extern "C" double gpuGmmLogLikelihood(
 	double* device_logL = mallocOnGpu(numPoints);
 
 	// TODO: calcDim...
-	kernGmmLogLikelihood<<<numPoints, 1>>>(
+	kernGmmLogLikelihood<<<1, numPoints>>>(
 		numPoints, numComponents,
 		device_logPi, device_logP, device_logL
 	);
 
+	// cudaReduceSum is synchronous
 	double logL = cudaReduceSum(&deviceProp, numPoints, device_logL);
 
 	cudaFree(device_logPi);
@@ -87,10 +74,9 @@ extern "C" double gpuGmmLogLikelihood(
 	return logL;
 }
 
-extern "C" double gpuSum(const size_t N, double* host_a) {
+extern "C" double gpuSum(size_t N, double* host_a) {
 	assert(host_a != NULL);
 	assert(N > 0);
-	assertPowerOfTwo(N);
 
 	int deviceId;
 	check(cudaGetDevice(&deviceId));
@@ -100,7 +86,25 @@ extern "C" double gpuSum(const size_t N, double* host_a) {
 
 	double *device_a = sendToGpu(N, host_a);
 
-	double sum = cudaReduceSum(
+	double cpuSum = 0;
+	if(N > 1024) {
+		// cudaReduceSum is meant for powers of two when N > 1024; 
+		size_t M = 2;
+		while(M < N) {
+			M *= 2;
+		}
+
+		if(M > N) {
+			M /= 2;
+			for(size_t i = M; i < N; ++i) {
+				cpuSum += host_a[i];
+			}
+			N = M;
+		}
+	}
+
+	// cudaReduceSum is synchronous
+	double sum = cpuSum + cudaReduceSum(
 		&deviceProp, N, device_a
 		);
 

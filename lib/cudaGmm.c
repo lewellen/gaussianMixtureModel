@@ -49,7 +49,7 @@ struct GMM* cudaFit(
 				X, 
 				gmm->components[k].mu,
 				gmm->components[k].sigmaL,
-				log(gmm->components[k].normalizer),
+				gmm->components[k].normalizer,
 				&loggamma[k * numPoints]
 			);
 		}

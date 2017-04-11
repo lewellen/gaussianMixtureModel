@@ -115,6 +115,7 @@ void logMvNormDist(
 	for (size_t point = 0; point < numPoints; ++point) {
 		// Normalizer already has negative sign on it.
 		P[point] = -0.5 * innerProduct[point] + component->normalizer;
+		assert(P[point] == P[point]);
 	}
 
 	free(XM);

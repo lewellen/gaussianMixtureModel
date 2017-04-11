@@ -14,6 +14,11 @@ extern double gpuGmmLogLikelihood(
 	const double* logPi, const double* logP
 );
 
+extern void gpuCalcLogGammaNK(
+	const size_t numPoints, const size_t pointDim, const size_t numComponents,
+	const double* logpi, double* loggamma
+);
+
 extern double gpuSum(
 	const size_t N, double* a
 );

@@ -10,6 +10,45 @@
 #include "cudaMVNormal.hu"
 #include "cudaGmm.hu"
 
+extern "C" double gpuSum(size_t N, double* host_a) {
+	assert(host_a != NULL);
+	assert(N > 0);
+
+	int deviceId;
+	check(cudaGetDevice(&deviceId));
+
+	cudaDeviceProp deviceProp;
+	check(cudaGetDeviceProperties(&deviceProp, deviceId));
+
+	double *device_a = sendToGpu(N, host_a);
+
+	double cpuSum = 0;
+	if(N > 1024) {
+		// cudaReduceSum is meant for powers of two when N > 1024; 
+		size_t M = 2;
+		while(M < N) {
+			M *= 2;
+		}
+
+		if(M > N) {
+			M /= 2;
+			for(size_t i = M; i < N; ++i) {
+				cpuSum += host_a[i];
+			}
+			N = M;
+		}
+	}
+
+	// cudaReduceSum is synchronous
+	double sum = cpuSum + cudaReduceSum(
+		&deviceProp, N, device_a
+		);
+
+	cudaFree(device_a);
+
+	return sum;
+}
+
 extern "C" void gpuLogMVNormDist(
 	const size_t numPoints, const size_t pointDim,
 	const double* X, const double* mu, const double* sigmaL,
@@ -53,7 +92,6 @@ extern "C" double gpuGmmLogLikelihood(
 	cudaDeviceProp deviceProp;
 	check(cudaGetDeviceProperties(&deviceProp, deviceId));
 
-	// TODO: Power of two padding?
 	double* device_logPi = sendToGpu(numComponents, logPi);
 	double* device_logP = sendToGpu(numComponents * numPoints, logP);
 	double* device_logL = mallocOnGpu(numPoints);
@@ -74,42 +112,30 @@ extern "C" double gpuGmmLogLikelihood(
 	return logL;
 }
 
-extern "C" double gpuSum(size_t N, double* host_a) {
-	assert(host_a != NULL);
-	assert(N > 0);
-
+extern "C" void gpuCalcLogGammaNK(
+	const size_t numPoints, const size_t pointDim, const size_t numComponents,
+	const double* logpi, double* loggamma
+) { 
 	int deviceId;
 	check(cudaGetDevice(&deviceId));
 
 	cudaDeviceProp deviceProp;
 	check(cudaGetDeviceProperties(&deviceProp, deviceId));
 
-	double *device_a = sendToGpu(N, host_a);
+	double* device_logpi = sendToGpu(numComponents, logpi);
+	double* device_loggamma = sendToGpu(numComponents * numPoints, loggamma);
 
-	double cpuSum = 0;
-	if(N > 1024) {
-		// cudaReduceSum is meant for powers of two when N > 1024; 
-		size_t M = 2;
-		while(M < N) {
-			M *= 2;
-		}
+	// TODO: calcDim...
+	kernCalcLogGammaNK<<<1, numPoints>>>(
+		numPoints, pointDim, numComponents,
+		device_logpi, device_loggamma
+	);
 
-		if(M > N) {
-			M /= 2;
-			for(size_t i = M; i < N; ++i) {
-				cpuSum += host_a[i];
-			}
-			N = M;
-		}
-	}
+	cudaMemcpy(loggamma, device_loggamma, numComponents * numPoints * sizeof(double), cudaMemcpyDeviceToHost);
 
-	// cudaReduceSum is synchronous
-	double sum = cpuSum + cudaReduceSum(
-		&deviceProp, N, device_a
-		);
+	cudaDeviceSynchronize();
 
-	cudaFree(device_a);
-
-	return sum;
+	cudaFree(device_logpi);
+	cudaFree(device_loggamma);
 }
 

@@ -9,4 +9,9 @@ __global__ void kernGmmLogLikelihood(
 	double* logL
 );
 
+__global__ void kernCalcLogGammaNK(
+	const size_t numPoints, const size_t pointDim, const size_t numComponents,
+	const double* logpi, double* loggamma
+);
+
 #endif

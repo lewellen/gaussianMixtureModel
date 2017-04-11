@@ -31,3 +31,35 @@ __global__ void kernGmmLogLikelihood(
 
 	logL[i] = maxArg + log(sum);
 }
+
+__global__ void kernCalcLogGammaNK(
+	const size_t numPoints, const size_t pointDim, const size_t numComponents,
+	const double* logpi, double* loggamma
+) {
+	// Assumes a 2D grid of 1024x1 1D blocks
+	int b = blockIdx.y * gridDim.x + blockIdx.x;
+	int i = b * blockDim.x + threadIdx.x;
+	if(i >= numPoints) {
+		return;
+	}
+
+	double maxArg = -INFINITY;
+	for (size_t k = 0; k < numComponents; ++k) {
+		const double arg = logpi[k] + loggamma[k * numPoints + i];
+		if(arg > maxArg) {
+			maxArg = arg;
+		}
+	}
+
+	// compute log p(x)
+	double sum = 0;
+	for(size_t k = 0; k < numComponents; ++k) {
+		const double arg = logpi[k] + loggamma[k * numPoints + i];
+		sum += exp(arg - maxArg);
+	}
+
+	const double logpx = maxArg + log(sum);
+	for(size_t k = 0; k < numComponents; ++k) {
+		loggamma[k * numPoints + i] += -logpx;
+	}
+}

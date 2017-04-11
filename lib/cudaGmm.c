@@ -54,10 +54,6 @@ struct GMM* cudaFit(
 			);
 		}
 	
-		// 2015-09-20 GEL Eliminated redundant mvNorm clac in logLikelihood by 
-		// passing in precomputed gamma values. Also moved loop termination here
-		// since likelihood determines termination. Result: 1.3x improvement in 
-		// execution time.  (~8 ms to ~6 ms on oldFaithful.dat)
 		prevLogL = currentLogL;
 		currentLogL = gpuGmmLogLikelihood(
 			numPoints, numComponents,
@@ -71,10 +67,9 @@ struct GMM* cudaFit(
 		}
 
 		// convert loggamma (really p(x_n|mu_k, Sigma_k)) into actual loggamma
-		calcLogGammaNK(
-			logpi, numComponents, 
-			0, numPoints, 
-			loggamma, numPoints
+		gpuCalcLogGammaNK(
+			numPoints, pointDim, numComponents, 
+			logpi, loggamma
 		);
 
 		// Let Gamma[component] = \Sum_point gamma[component, point]

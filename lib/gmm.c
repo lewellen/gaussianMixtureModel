@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <stdio.h>
+
 #include "gmm.h"
 #include "linearAlgebra.h"
 #include "util.h"

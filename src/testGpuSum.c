@@ -55,6 +55,9 @@ void testParallelOdds() {
 
 		double host_sum = sequentialSum(a, N);
 		double device_sum = gpuSum(N, a);
+		assert(device_sum != -INFINITY);
+		assert(device_sum != INFINITY);
+		assert(device_sum == device_sum);
 
 		double absDiff = fabs(host_sum - device_sum);
 		if(absDiff > DBL_EPSILON) {

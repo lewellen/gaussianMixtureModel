@@ -73,12 +73,12 @@ struct GMM* cudaFit(
 		);
 
 		// Let Gamma[component] = \Sum_point gamma[component, point]
-		calcLogGammaK(
-			loggamma, numPoints, 
-			0, numComponents, 
-			logGamma, numComponents
+		gpuCalcLogGammaK(
+			numPoints, numComponents,
+			loggamma, logGamma
 		);
-	
+
+		// Not worth running on gpu since k should be smallish	
 		double logGammaSum = calcLogGammaSum(logpi, numComponents, logGamma);
 
 		// --- M-Step ---

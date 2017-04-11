@@ -206,9 +206,11 @@ void calcLogGammaK(
 
 	memset(&logGamma[componentStart], 0, (componentEnd - componentStart) * sizeof(double));
 	for(size_t k = componentStart; k < componentEnd; ++k) {
+		const double* loggammak = & loggamma[k * numPoints];
+
 		double maxArg = -INFINITY;
 		for(size_t point = 0; point < numPoints; ++point) {
-			const double loggammank = loggamma[k * numPoints + point];
+			const double loggammank = loggammak[point];
 			if(loggammank > maxArg) {
 				maxArg = loggammank;
 			}
@@ -216,7 +218,7 @@ void calcLogGammaK(
 
 		double sum = 0;
 		for(size_t point = 0; point < numPoints; ++point) {
-			const double loggammank = loggamma[k * numPoints + point];
+			const double loggammank = loggammak[point];
 			sum += exp(loggammank - maxArg);
 		}
 		assert(sum >= 0);

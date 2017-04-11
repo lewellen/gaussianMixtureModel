@@ -13,31 +13,33 @@ void initialize(double* a, size_t N) {
 	}
 }
 
-double sequentialSum(double* a, const size_t N) {
+double sequentialMax(double* a, const size_t N) {
 	assert(a != NULL);
 	assert(N > 0);
 
-	double sum = 0;
+	double max = -INFINITY;
 	for(size_t i = 0; i < N; ++i) {
-		sum += a[i];
+		if(max < a[i]) {
+			max = a[i];
+		}
 	}
-	return sum;
+	return max;
 }
 
-void testgEvens() {
+void testEvens() {
 	const size_t minN = 2;
 	const size_t maxN = 16 * 1048576;
 	for(size_t N = minN; N <= maxN; N *= 2) {
 		double* a = (double*) malloc(N * sizeof(double));
 		initialize(a, N);
 
-		double host_sum = sequentialSum(a, N);
-		double device_sum = gpuSum(N, a);
+		double host_max = sequentialMax(a, N);
+		double device_max = gpuMax(N, a);
 
-		double absDiff = fabs(host_sum - device_sum);
+		double absDiff = fabs(host_max - device_max);
 		if(absDiff >= DBL_EPSILON) {
-			printf("N: %zu, host_sum: %.15f, device_sum: %.15f, absDiff: %.15f\n", 
-				N, host_sum, device_sum, absDiff
+			printf("N: %zu, host_max: %.15f, device_max: %.15f, absDiff: %.15f\n", 
+				N, host_max, device_max, absDiff
 				);
 		}
 
@@ -47,34 +49,33 @@ void testgEvens() {
 	}
 }
 
-void testgOdds() {
+void testOdds() {
 	const size_t minN = 1;
 	const size_t maxN = 10000;
 	for(size_t N = minN; N <= maxN; N += 9) {
 		double* a = (double*) malloc(N * sizeof(double));
 		initialize(a, N);
 
-		double host_sum = sequentialSum(a, N);
-		double device_sum = gpuSum(N, a);
-		assert(device_sum != -INFINITY);
-		assert(device_sum != INFINITY);
-		assert(device_sum == device_sum);
+		double host_max = sequentialMax(a, N);
+		double device_max = gpuMax(N, a);
+		assert(device_max != -INFINITY);
+		assert(device_max != INFINITY);
+		assert(device_max == device_max);
 
-		double absDiff = fabs(host_sum - device_sum);
+		double absDiff = fabs(host_max - device_max);
 		if(absDiff >= DBL_EPSILON) {
-			printf("N: %zu, host_sum: %.15f, device_sum: %.15f, absDiff: %.15f\n", 
-				N, host_sum, device_sum, absDiff
+			printf("N: %zu, host_max: %.15f, device_max: %.15f, absDiff: %.15f\n", 
+				N, host_max, device_max, absDiff
 				);
 		}
 
 		assert(absDiff < DBL_EPSILON);
-
 		free(a);
 	}
 }
 int main(int argc, char** argv) {
-	testgEvens();
-	testgOdds();
+	testEvens();
+	testOdds();
 
 	printf("PASS: %s\n", argv[0]);
 	return EXIT_SUCCESS;

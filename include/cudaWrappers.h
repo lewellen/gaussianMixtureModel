@@ -3,6 +3,14 @@
 
 #include <stdlib.h>
 
+extern double gpuSum(
+	const size_t N, double* a
+);
+
+extern double gpuMax(
+	const size_t N, double* a
+);
+
 extern void gpuLogMVNormDist(
 	const size_t numPoints, const size_t pointDim,
 	const double* X, const double* mu, const double* sigmaL, const double logNormalizer,
@@ -19,8 +27,9 @@ extern void gpuCalcLogGammaNK(
 	const double* logpi, double* loggamma
 );
 
-extern double gpuSum(
-	const size_t N, double* a
+extern void gpuCalcLogGammaK(
+	const size_t numPoints, const size_t numComponents,
+	const double* loggamma, double* logGamma
 );
 
 #endif

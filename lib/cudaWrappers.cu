@@ -20,11 +20,9 @@ extern "C" double gpuSum(size_t N, double* host_a) {
 	cudaDeviceProp deviceProp;
 	check(cudaGetDeviceProperties(&deviceProp, deviceId));
 
-	double *device_a = sendToGpu(N, host_a);
-
 	double cpuSum = 0;
 	if(N > 1024) {
-		// cudaReduceSum is meant for powers of two when N > 1024; 
+		// cudaArraySum is meant for powers of two when N > 1024; 
 		size_t M = 2;
 		while(M < N) {
 			M *= 2;
@@ -39,14 +37,61 @@ extern "C" double gpuSum(size_t N, double* host_a) {
 		}
 	}
 
-	// cudaReduceSum is synchronous
-	double sum = cpuSum + cudaReduceSum(
+	double *device_a = sendToGpu(N, host_a);
+
+	// cudaArraySum is synchronous
+	double sum = cpuSum + cudaArraySum(
 		&deviceProp, N, device_a
 		);
 
 	cudaFree(device_a);
 
 	return sum;
+}
+
+extern "C" double gpuMax(size_t N, double* host_a) {
+	assert(host_a != NULL);
+	assert(N > 0);
+
+	int deviceId;
+	check(cudaGetDevice(&deviceId));
+
+	cudaDeviceProp deviceProp;
+	check(cudaGetDeviceProperties(&deviceProp, deviceId));
+
+	double cpuMax = -INFINITY;
+	if(N > 1024) {
+		// cudaArraySum is meant for powers of two when N > 1024; 
+		size_t M = 2;
+		while(M < N) {
+			M *= 2;
+		}
+
+		if(M > N) {
+			M /= 2;
+			for(size_t i = M; i < N; ++i) {
+				if(host_a[i] > cpuMax) {
+					cpuMax = host_a[i];
+				}
+			}
+			N = M;
+		}
+	}
+
+	double *device_a = sendToGpu(N, host_a);
+
+	// cudaArraySum is synchronous
+	double gpuMax = cudaArrayMax(
+		&deviceProp, N, device_a
+		);
+
+	cudaFree(device_a);
+
+	if(cpuMax > gpuMax) {
+		return cpuMax;
+	}
+
+	return gpuMax;
 }
 
 extern "C" void gpuLogMVNormDist(
@@ -102,8 +147,8 @@ extern "C" double gpuGmmLogLikelihood(
 		device_logPi, device_logP, device_logL
 	);
 
-	// cudaReduceSum is synchronous
-	double logL = cudaReduceSum(&deviceProp, numPoints, device_logL);
+	// cudaArraySum is synchronous
+	double logL = cudaArraySum(&deviceProp, numPoints, device_logL);
 
 	cudaFree(device_logPi);
 	cudaFree(device_logP);
@@ -139,3 +184,24 @@ extern "C" void gpuCalcLogGammaNK(
 	cudaFree(device_loggamma);
 }
 
+extern "C" void gpuCalcLogGammaK(
+	const size_t numPoints, const size_t numComponents,
+	const double* loggamma, double* logGamma
+) {
+	// Gamma[k] = max + log sum exp(loggamma - max)
+
+	double* working = (double*)malloc(numPoints * sizeof(double));
+	for(size_t k = 0; k < numComponents; ++k) {
+		// TODO: refactor to have a generic z = a + log sum exp(x - a)
+		memcpy(working, & loggamma[k * numPoints], numPoints * sizeof(double));
+		double maxValue = gpuMax(numPoints, working);
+
+		memcpy(working, & loggamma[k * numPoints], numPoints * sizeof(double));
+		for(size_t i = 0; i < numPoints; ++i) {
+			working[i] = exp(working[i] - maxValue);
+		}
+
+		logGamma[k] = maxValue + log( gpuSum(numPoints, working) );
+	}
+	free(working);
+}

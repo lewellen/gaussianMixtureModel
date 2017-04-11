@@ -73,43 +73,44 @@ __host__ double* sendToGpu(const size_t N, const double* A) {
 	return device_A;
 }
 
-__global__ void kernArraySum(int N, double* dest, double* src) {
+__global__ void kernElementWiseSum(int N, double* dest, double* src) {
 	// Assumes a 2D grid of 1D blocks
 	int b = blockIdx.y * gridDim.x + blockIdx.x;
 	int i = b * blockDim.x + threadIdx.x;
-	dest[i] += src[i];
+	if(i < N) {
+		dest[i] += src[i];
+	}
 }
 
-__global__ void kernReduceBlocks(const size_t N, double* dest) {
+__global__ void kernBlockWiseSum(const size_t N, double* dest) {
 	// Assumes a 2D grid of 1024x1 1D blocks
 	int b = blockIdx.y * gridDim.x + blockIdx.x;
 	int i = b * blockDim.x + threadIdx.x;
 
 	// Load into block shared memory
-	__shared__ double localSum[1024];
+	__shared__ double blockSum[1024];
 
 	if(threadIdx.x >= N) {
-		localSum[threadIdx.x] = 0;
+		blockSum[threadIdx.x] = 0;
 	} else {
-		localSum[threadIdx.x] = dest[i];
+		blockSum[threadIdx.x] = dest[i];
 	}
 
 	__syncthreads();	
 
 	// Do all the calculations in block shared memory instead of global memory.
 	for(int s = blockDim.x / 2; threadIdx.x < s; s /= 2) {
-		localSum[threadIdx.x] += localSum[threadIdx.x + s];
+		blockSum[threadIdx.x] += blockSum[threadIdx.x + s];
 		__syncthreads();
 	}
 
 	if(threadIdx.x == 0) {
 		// Just do one global write instead of 2048.
-		dest[i] = localSum[0];
+		dest[i] = blockSum[0];
 	}
 }
 
-__host__ double cudaReduceSum(cudaDeviceProp* deviceProp, const size_t N, double* device_A) {
-
+__host__ double cudaArraySum(cudaDeviceProp* deviceProp, const size_t N, double* device_A) {
 	// Parallel sum by continually folding the array in half and adding the right 
 	// half to the left half until the fold size is 1024 (single block), then let
 	// GPU reduce the remaining block to a single value and copy it over. O(log n).
@@ -118,14 +119,76 @@ __host__ double cudaReduceSum(cudaDeviceProp* deviceProp, const size_t N, double
 		dim3 block, grid;
 		for(size_t n = N/2; n >= 1024; n /= 2) {
 			calcDim(n, deviceProp, &block, &grid);
-			kernArraySum<<<grid, block>>>(n, device_A, device_A + n);
+			kernElementWiseSum<<<grid, block>>>(n, device_A, device_A + n);
 		}
 	}
  
-	kernReduceBlocks<<<1, 1024>>>(N, device_A);
+	kernBlockWiseSum<<<1, 1024>>>(N, device_A);
 
 	double sum = 0;
 	check(cudaMemcpy(&sum, device_A, sizeof(double), cudaMemcpyDeviceToHost));
 	cudaDeviceSynchronize();
 	return sum;
+}
+
+__global__ void kernElementWiseMax(int N, double* dest, double* src) {
+	// Assumes a 2D grid of 1D blocks
+	int b = blockIdx.y * gridDim.x + blockIdx.x;
+	int i = b * blockDim.x + threadIdx.x;
+	if(i < N) {
+		if(dest[i] < src[i]) {
+			dest[i] = src[i];
+		}
+	}
+}
+
+__global__ void kernBlockWiseMax(const size_t N, double* dest) {
+	// Assumes a 2D grid of 1024x1 1D blocks
+	int b = blockIdx.y * gridDim.x + blockIdx.x;
+	int i = b * blockDim.x + threadIdx.x;
+
+	// Load into block shared memory
+	__shared__ double blockMax[1024];
+
+	if(threadIdx.x >= N) {
+		blockMax[threadIdx.x] = -INFINITY;
+	} else {
+		blockMax[threadIdx.x] = dest[i];
+	}
+
+	__syncthreads();	
+
+	// Do all the calculations in block shared memory instead of global memory.
+	for(int s = blockDim.x / 2; threadIdx.x < s; s /= 2) {
+		if(blockMax[threadIdx.x] < blockMax[threadIdx.x + s]) {
+			blockMax[threadIdx.x] = blockMax[threadIdx.x + s];
+		}
+		__syncthreads();
+	}
+
+	if(threadIdx.x == 0) {
+		// Just do one global write instead of 2048.
+		dest[i] = blockMax[0];
+	}
+}
+
+__host__ double cudaArrayMax(cudaDeviceProp* deviceProp, const size_t N, double* device_A) {
+	// Parallel max by continually folding the array in half and maxing the right 
+	// half to the left half until the fold size is 1024 (single block), then let
+	// GPU reduce the remaining block to a single value and copy it over. O(log n).
+	if(N >= 1024) {
+		assertPowerOfTwo(N);
+		dim3 block, grid;
+		for(size_t n = N/2; n >= 1024; n /= 2) {
+			calcDim(n, deviceProp, &block, &grid);
+			kernElementWiseMax<<<grid, block>>>(n, device_A, device_A + n);
+		}
+	}
+ 
+	kernBlockWiseMax<<<1, 1024>>>(N, device_A);
+
+	double maxValue = 0;
+	check(cudaMemcpy(&maxValue, device_A, sizeof(double), cudaMemcpyDeviceToHost));
+	cudaDeviceSynchronize();
+	return maxValue;
 }

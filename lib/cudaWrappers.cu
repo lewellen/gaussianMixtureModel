@@ -55,7 +55,7 @@ extern "C" double gpuGmmLogLikelihood(
 
 	// TODO: Power of two padding?
 	double* device_logPi = sendToGpu(numComponents, logPi);
-	double* device_logP = sendToGpu(numComponents, logP);
+	double* device_logP = sendToGpu(numComponents * numPoints, logP);
 	double* device_logL = mallocOnGpu(numPoints);
 
 	// TODO: calcDim...

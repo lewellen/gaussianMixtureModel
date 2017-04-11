@@ -63,7 +63,7 @@ struct GMM* cudaFit(
 			numPoints, numComponents,
 			logpi, loggamma
 		);
-
+		
 		assert(maxIterations > 0);
 		--maxIterations;
 		if(!shouldContinue(maxIterations, prevLogL, currentLogL, tolerance)) {

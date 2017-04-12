@@ -1,7 +1,7 @@
 #ifndef CUDAKERNALS_H
 #define CUDAKERNALS_H
 
-#define check(call) { cudaError_t __ABC123 = call; if(__ABC123 != cudaSuccess) { printf("%s:%d\t%s: %s\n", __FILE__, __LINE__, #call, cudaGetErrorString(__ABC123)); } assert(__ABC123 == cudaSuccess); }
+#define check(call) { call; cudaError_t __ABC123 = cudaGetLastError(); if(__ABC123 != cudaSuccess) { printf("%s:%d\t%s: %s\n", __FILE__, __LINE__, #call, cudaGetErrorString(__ABC123)); } assert(__ABC123 == cudaSuccess); }
 
 #include <stdlib.h>
 
@@ -16,11 +16,15 @@ __host__ double* mallocOnGpu(const size_t N);
 __host__ double* sendToGpu(const size_t N, const double* A);
 
 
-__global__ void kernElementWiseSum(int N, double* dest, double* src);
 
-__global__ void kernBlockWiseSum(double* dest);
+__device__ void devVecAdd(size_t pointDim, double* dest, double* src);
 
-__host__ double cudaArraySum(cudaDeviceProp* deviceProp, const size_t N, double* device_A);
+__global__ void kernElementWiseSum(const size_t numPoints, const size_t pointDim, double* dest, double* src);
+
+__global__ void kernBlockWiseSum(const size_t numPoints, const size_t pointDim, double* dest);
+
+__host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A, double* host_sum);
+
 
 
 __global__ void kernElementWiseMax(int N, double* dest, double* src);
@@ -29,4 +33,9 @@ __global__ void kernBlockWiseMax(double* dest);
 
 __host__ double cudaArrayMax(cudaDeviceProp* deviceProp, const size_t N, double* device_A);
 
+
+__host__ void cudaVecArraySum(
+	const size_t numPoints, const size_t pointDim,
+	double* device_A
+);
 #endif

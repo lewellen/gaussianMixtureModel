@@ -3,8 +3,9 @@
 
 #include <stdlib.h>
 
-extern double gpuSum(
-	const size_t N, double* a
+extern void gpuSum(
+	size_t numPoints, size_t pointDim, 
+	double* host_a, double* host_sum
 );
 
 extern double gpuMax(
@@ -30,6 +31,13 @@ extern void gpuCalcLogGammaNK(
 extern void gpuCalcLogGammaK(
 	const size_t numPoints, const size_t numComponents,
 	const double* loggamma, double* logGamma
+);
+
+extern void gpuPerformMStep(
+	const size_t numPoints, const size_t pointDim,
+	const double* X, 
+	double* loggamma, double logGammaK, double logGammaSum,
+	double* logpik, double* mu, double* sigma
 );
 
 #endif

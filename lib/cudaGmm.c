@@ -82,14 +82,16 @@ struct GMM* cudaFit(
 		double logGammaSum = calcLogGammaSum(logpi, numComponents, logGamma);
 
 		// --- M-Step ---
-		performMStep(
-			gmm->components, numComponents,
-			0, numComponents,
-			logpi, loggamma, logGamma, logGammaSum,
-			X, numPoints, pointDim,
-			outerProduct, xm
-		);
+		for(size_t k = 0; k < numComponents; ++k) {
+			gpuPerformMStep(
+				numPoints, pointDim,
+				X, 
+				& loggamma[k * numPoints], logGamma[k], logGammaSum,
+				& logpi[k], gmm->components[k].mu, gmm->components[k].sigma
+			);
 
+			prepareCovariance(& gmm->components[k], pointDim);
+		}
 	} while (1 == 1);
 
 	free(logpi);

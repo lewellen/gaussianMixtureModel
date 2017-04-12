@@ -14,4 +14,16 @@ __global__ void kernCalcLogGammaNK(
 	const double* logpi, double* loggamma
 );
 
+__global__ void kernCalcMu(
+	const size_t numPoints, const size_t pointDim,
+	const double* X, const double* loggamma, const double logGammaSum,
+	double* dest
+);
+
+__global__ void kernCalcSigma(
+	const size_t numPoints, const size_t pointDim,
+	const double* X, const double* mu, const double* loggamma, const double logGammaSum,
+	double* dest
+);
+	
 #endif

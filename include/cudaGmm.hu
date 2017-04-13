@@ -9,6 +9,14 @@ __global__ void kernGmmLogLikelihood(
 	double* logL
 );
 
+__host__ double cudaGmmLogLikelihood(
+	cudaDeviceProp* deviceProp,
+	const size_t numPoints, const size_t numComponents,
+	const size_t M,
+	const double* logpi, const double* logP,
+	const double* device_logpi, const double* device_logP
+);
+
 __global__ void kernCalcLogGammaNK(
 	const size_t numPoints, const size_t pointDim, const size_t numComponents,
 	const double* logpi, double* loggamma

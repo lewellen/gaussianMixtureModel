@@ -33,6 +33,16 @@ extern void gpuCalcLogGammaK(
 	const double* loggamma, double* logGamma
 );
 
+
+
+
+extern double gpuPerformEStep(
+	const size_t numPoints, const size_t pointDim, const size_t numComponents,
+	const double* X, 
+	const double* logpi, const double* mu, const double* sigma,
+	double* logP
+);
+
 extern void gpuPerformMStep(
 	const size_t numPoints, const size_t pointDim,
 	const double* X, 

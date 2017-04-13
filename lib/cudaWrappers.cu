@@ -124,7 +124,7 @@ extern "C" void gpuLogMVNormDist(
 
 extern "C" double gpuGmmLogLikelihood(
 	const size_t numPoints, const size_t numComponents,
-	const double* logPi, const double* logP
+	const double* logpi, const double* logP
 ) {
 	int deviceId;
 	check(cudaGetDevice(&deviceId));
@@ -134,44 +134,19 @@ extern "C" double gpuGmmLogLikelihood(
 
 	const size_t M = largestPowTwoLessThanEq(numPoints); 
 
-	double* device_logPi = sendToGpu(numComponents, logPi);
+	double* device_logpi = sendToGpu(numComponents, logpi);
 	double* device_logP = sendToGpu(numComponents * M, logP);
-	double* device_logL = mallocOnGpu(M);
 
-	dim3 grid, block;
-	calcDim(M, &deviceProp, &block, &grid);
-	kernGmmLogLikelihood<<<grid, block>>>(
-		M, numComponents,
-		device_logPi, device_logP, device_logL
+	double logL = cudaGmmLogLikelihood(
+		& deviceProp,
+		numPoints, numComponents,
+		M,
+		logpi, logP,
+		device_logpi, device_logP
 	);
 
-	// cudaArraySum is synchronous
-	double logL = 0;
-	cudaArraySum(&deviceProp, M, 1, device_logL, &logL);
-
-	if(M != numPoints) {
-		for(size_t i = M; i < numPoints; ++i) {
-			double maxArg = -INFINITY;
-			for(size_t k = 0; k < numComponents; ++k) {
-				const double logProbK = logPi[k] + logP[k * numPoints + i];
-				if(logProbK > maxArg) {
-					maxArg = logProbK;
-				}
-			}
-
-			double sum = 0.0;
-			for (size_t k = 0; k < numComponents; ++k) {
-				const double logProbK = logPi[k] + logP[k * numPoints + i];
-				sum = exp(logProbK - maxArg);
-			}
-
-			logL += maxArg + log(sum);
-		}
-	}
-
-	cudaFree(device_logPi);
+	cudaFree(device_logpi);
 	cudaFree(device_logP);
-	cudaFree(device_logL);
 
 	return logL;
 }
@@ -226,6 +201,62 @@ extern "C" void gpuCalcLogGammaK(
  		logGamma[k] = maxValue + log(sum );
 	}
 	free(working);
+}
+
+extern "C" double gpuPerformEStep(
+	const size_t numPoints, const size_t pointDim, const size_t numComponents,
+	const double* X, 
+	const double* logpi, const double* Mu, const double* SigmaL,
+	double* logP
+) {
+	int deviceId;
+	check(cudaGetDevice(&deviceId));
+
+	cudaDeviceProp deviceProp;
+	check(cudaGetDeviceProperties(&deviceProp, deviceId));
+
+	double* device_X = sendToGpu(numPoints * pointDim, X);
+
+	double* device_logpi = sendToGpu(numComponents, logpi);
+	double* device_Mu = sendToGpu(pointDim * numComponents, Mu);
+	double* device_SigmaL = sendToGpu(pointDim * pointDim * numComponents, SigmaL);
+
+	double* device_logP = mallocOnGpu(numPoints * numComponents);
+
+	dim3 grid, block;
+	calcDim(numPoints, &deviceProp, &block, &grid);
+	for(size_t k = 0; k < numComponents; ++k) {
+		kernLogMVNormDist<<<grid, block>>>(
+			numPoints, pointDim,
+			device_X, 
+			& device_Mu[k * pointDim], 
+			& device_SigmaL[k * pointDim * pointDim],
+			& device_logP[k * numPoints]
+		);
+	}
+
+	const size_t M = largestPowTwoLessThanEq(numPoints);
+
+	double logL = cudaGmmLogLikelihood(
+		& deviceProp,
+		numPoints, numComponents,
+		M,
+		logpi, logP,
+		device_logpi, device_logP
+	);
+
+	cudaFree(device_X);
+
+	cudaFree(device_logpi);
+	cudaFree(device_Mu);
+	cudaFree(device_SigmaL);
+
+	check(cudaMemcpy(logP, device_logP, 
+		numPoints * numComponents * sizeof(double), cudaMemcpyDeviceToHost));
+
+	cudaFree(device_logP);
+
+	return logL;
 }
 
 extern "C" void gpuPerformMStep(

@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "gmm.h"
 #include "cudaGmm.h"
@@ -39,25 +40,24 @@ struct GMM* cudaFit(
 		logpi[k] = log(pik);
 	}
 
+	double* Mu = (double*) checkedCalloc(pointDim * numComponents, sizeof(double));
+	double* SigmaL = (double*) checkedCalloc(pointDim * pointDim * numComponents, sizeof(double));
+
 	do {
 		// --- E-Step ---
 
-		// Compute gamma
 		for(size_t k = 0; k < numComponents; ++k) {
-			gpuLogMVNormDist(
-				numPoints, pointDim,
-				X, 
-				gmm->components[k].mu,
-				gmm->components[k].sigmaL,
-				gmm->components[k].normalizer,
-				&loggamma[k * numPoints]
-			);
+			struct Component* C = & gmm->components[k];
+			memcpy(&Mu[k * pointDim], C->mu, pointDim * sizeof(double));
+			memcpy(&SigmaL[k * pointDim * pointDim], C->sigmaL, pointDim * pointDim * sizeof(double));
 		}
-	
+
 		prevLogL = currentLogL;
-		currentLogL = gpuGmmLogLikelihood(
-			numPoints, numComponents,
-			logpi, loggamma
+		currentLogL = gpuPerformEStep(
+			numPoints, pointDim, numComponents,
+			X,
+			logpi, Mu, SigmaL,
+			loggamma
 		);
 		
 		assert(maxIterations > 0);
@@ -95,6 +95,9 @@ struct GMM* cudaFit(
 			prepareCovariance(& gmm->components[k], pointDim);
 		}
 	} while (1 == 1);
+
+	free(Mu);
+	free(SigmaL);
 
 	free(logpi);
 	free(loggamma);

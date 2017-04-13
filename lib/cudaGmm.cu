@@ -35,6 +35,56 @@ __global__ void kernGmmLogLikelihood(
 	logL[i] = maxArg + log(sum);
 }
 
+__host__ double cudaGmmLogLikelihood(
+	cudaDeviceProp* deviceProp,
+	const size_t numPoints, const size_t numComponents,
+	const size_t M,
+	const double* logpi, const double* logP,
+	const double* device_logpi, const double* device_logP
+) {
+	dim3 grid, block;
+	calcDim(M, deviceProp, &block, &grid);
+
+	double logL = 0;
+	double* device_logL = mallocOnGpu(M);
+
+	kernGmmLogLikelihood<<<grid, block>>>(
+		M, numComponents,
+		device_logpi, device_logP, device_logL
+	);
+
+	cudaArraySum(
+		deviceProp, 
+		M, 1, 
+		device_logL, 
+		&logL
+	);
+
+	cudaFree(device_logL);
+
+	if(M != numPoints) {
+		for(size_t i = M; i < numPoints; ++i) {
+			double maxArg = -INFINITY;
+			for(size_t k = 0; k < numComponents; ++k) {
+				const double logProbK = logpi[k] + logP[k * numPoints + i];
+				if(logProbK > maxArg) {
+					maxArg = logProbK;
+				}
+			}
+
+			double sum = 0.0;
+			for (size_t k = 0; k < numComponents; ++k) {
+				const double logProbK = logpi[k] + logP[k * numPoints + i];
+				sum = exp(logProbK - maxArg);
+			}
+
+			logL += maxArg + log(sum);
+		}
+	}
+
+	return logL;
+}
+
 __global__ void kernCalcLogGammaNK(
 	const size_t numPoints, const size_t pointDim, const size_t numComponents,
 	const double* logpi, double* loggamma

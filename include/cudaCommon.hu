@@ -7,6 +7,8 @@
 
 __host__ void assertPowerOfTwo(size_t N);
 
+__host__ size_t largestPowTwoLessThanEq(size_t N);
+
 __host__ void calcDim(int N, cudaDeviceProp* devProp, dim3* block, dim3* grid);
 
 __host__ void dimToConsole(dim3* block, dim3* grid);
@@ -23,6 +25,8 @@ __global__ void kernElementWiseSum(const size_t numPoints, const size_t pointDim
 
 __global__ void kernBlockWiseSum(const size_t numPoints, const size_t pointDim, double* dest);
 
+__host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A);
+
 __host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A, double* host_sum);
 
 
@@ -33,9 +37,4 @@ __global__ void kernBlockWiseMax(double* dest);
 
 __host__ double cudaArrayMax(cudaDeviceProp* deviceProp, const size_t N, double* device_A);
 
-
-__host__ void cudaVecArraySum(
-	const size_t numPoints, const size_t pointDim,
-	double* device_A
-);
 #endif

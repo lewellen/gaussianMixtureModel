@@ -14,6 +14,24 @@ __host__ void assertPowerOfTwo(size_t N) {
 	assert(bit <= 1);
 }
 
+__host__ size_t largestPowTwoLessThanEq(size_t N) {
+	// Assigns the largest value (M = 2^n) < N to N and returns the residual.
+	if(N == 0) {
+		return 0;
+	} // PC: N > 0
+
+	size_t M = 1;
+	while(M < N) {
+		M *= 2;
+	} // PC: M >= N
+
+	if(M == N) {
+		return M;
+	} // PC: M > N
+	
+	return M / 2;
+}
+
 __host__ void calcDim(int N, cudaDeviceProp* devProp, dim3* block, dim3* grid) {
 	assert(devProp != NULL);
 	assert(block != NULL);
@@ -103,13 +121,12 @@ __global__ void kernBlockWiseSum(const size_t numPoints, const size_t pointDim, 
 	}
 }
 
-__host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A, double* host_sum) {
+__host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A) {
 	assert(deviceProp != NULL);
 	assert(numPoints > 0);
 	assertPowerOfTwo(numPoints);
 	assert(pointDim > 0);
 	assert(device_A != NULL);
-	assert(host_sum != NULL);
 
 	// Parallel sum by continually folding the array in half and adding the right 
 	// half to the left half until the fold size is 1024 (single block), then let
@@ -128,7 +145,11 @@ __host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const s
 	kernBlockWiseSum<<<1, numPoints>>>(
 		numPoints, pointDim, device_A
 	);
+}
 
+__host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A, double* host_sum) {
+	assert(host_sum != NULL);
+	cudaArraySum(deviceProp, numPoints, pointDim, device_A);
 	check(cudaMemcpy(host_sum, device_A, pointDim * sizeof(double), cudaMemcpyDeviceToHost));
 }
 
@@ -194,11 +215,4 @@ __host__ double cudaArrayMax(cudaDeviceProp* deviceProp, const size_t N, double*
 	check(cudaMemcpy(&maxValue, device_A, sizeof(double), cudaMemcpyDeviceToHost));
 	check(cudaDeviceSynchronize());
 	return maxValue;
-}
-
-__host__ void cudaVecArraySum(
-	const size_t numPoints, const size_t pointDim,
-	double* device_A
-) {
-
 }

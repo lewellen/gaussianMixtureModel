@@ -1,6 +1,8 @@
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 
+#include "cudaCommon.hu"
 #include "cudaGmm.hu"
 
 __global__ void kernGmmLogLikelihood(
@@ -66,7 +68,7 @@ __global__ void kernCalcLogGammaNK(
 
 __global__ void kernCalcMu(
 	const size_t numPoints, const size_t pointDim,
-	const double* X, const double* loggamma, const double logGammaSum,
+	const double* X, const double* loggamma, const double logGammaK,
 	double* dest
 ) {
 	// Assumes a 2D grid of 1024x1 1D blocks
@@ -76,7 +78,7 @@ __global__ void kernCalcMu(
 		return;
 	}
 
-	const double a = exp(loggamma[i]) / exp(logGammaSum);
+	const double a = exp(loggamma[i]) / exp(logGammaK);
 	const double* x = & X[i * pointDim];
 	double* y = & dest[i * pointDim]; 
 
@@ -87,9 +89,11 @@ __global__ void kernCalcMu(
 
 __global__ void kernCalcSigma(
 	const size_t numPoints, const size_t pointDim,
-	const double* X, const double* mu, const double* loggamma, const double logGammaSum,
+	const double* X, const double* mu, const double* loggamma, const double logGammaK,
 	double* dest
-) {	
+) {
+	assert(pointDim < 1024);
+	
 	// Assumes a 2D grid of 1024x1 1D blocks
 	int b = blockIdx.y * gridDim.x + blockIdx.x;
 	int i = b * blockDim.x + threadIdx.x;
@@ -99,7 +103,7 @@ __global__ void kernCalcSigma(
 
 	// gamma_{n,k} / Gamma_{k} (x - mu) (x - mu)^T
 
-	const double a = exp(loggamma[i]) / exp(logGammaSum);
+	const double a = exp(loggamma[i]) / exp(logGammaK);
 	const double* x = & X[i * pointDim];
 	double* y = & dest[i * pointDim * pointDim]; 
 
@@ -112,6 +116,105 @@ __global__ void kernCalcSigma(
 		double* yp = &y[i * pointDim];
 		for(size_t j = 0; j < pointDim; ++j) {
 			yp[j] = a * u[i] * u[j];
+		}
+	}
+}
+
+__host__ void cudaUpdateMu(
+	cudaDeviceProp* deviceProp,
+	const size_t numPoints, const size_t pointDim,
+	const size_t M,
+	const double* X, const double* loggamma, const double logGammaK,
+	const double* device_X, const double* device_loggamma,
+	double* mu
+) {
+	dim3 grid, block;
+	calcDim(M, deviceProp, &block, &grid);
+
+	double* device_mu_working = mallocOnGpu(M * pointDim);
+
+	kernCalcMu<<<grid, block>>>(
+		M, pointDim, 
+		device_X, device_loggamma, logGammaK, 
+		device_mu_working
+	);
+
+	cudaArraySum(
+		deviceProp,
+		M, pointDim, 
+		device_mu_working,
+		mu
+	);
+
+	cudaFree(device_mu_working);
+
+	if(M != numPoints) {
+		double cpuMuSum[pointDim];
+		memset(cpuMuSum, 0, pointDim * sizeof(double));
+		for(size_t i = M; i < numPoints; ++i) {
+			double a = exp(loggamma[i]) / exp(logGammaK);
+			for(size_t j = 0; j < pointDim; ++j) {
+				cpuMuSum[j] += a * X[i * pointDim + j];
+			}
+		}
+
+		for(size_t i = 0; i < pointDim; ++i) {
+			mu[i] += cpuMuSum[i];
+		}
+	}
+}
+
+__host__ void cudaUpdateSigma(
+	cudaDeviceProp* deviceProp,
+	const size_t numPoints, const size_t pointDim,
+	const size_t M,
+	const double* X, const double* loggamma, const double logGammaK,
+	const double* device_X, const double* device_loggamma,
+	double* mu, 
+	double* sigma
+) {
+	dim3 grid, block;
+	calcDim(M, deviceProp, &block, &grid);
+
+	double* device_mu = sendToGpu(pointDim, mu);
+	double* device_sigma_working = mallocOnGpu(M * pointDim * pointDim);
+
+	kernCalcSigma<<<grid, block>>>(
+		M, pointDim, 
+		device_X, device_mu, device_loggamma, logGammaK, 
+		device_sigma_working
+	);
+
+	cudaArraySum(
+		deviceProp,
+		M, pointDim * pointDim, 
+		device_sigma_working,
+		sigma
+	);
+
+	cudaFree(device_sigma_working);
+
+	if(M != numPoints) {
+		double cpuSigmaSum[pointDim * pointDim];
+		memset(cpuSigmaSum, 0, pointDim * pointDim * sizeof(double));
+
+		for(size_t i = M; i < numPoints; ++i) {
+			double a = exp(loggamma[i]) / exp(logGammaK);
+	
+			double xm[pointDim];
+			for(size_t j = 0; j < pointDim; ++j) {
+				xm[j] = X[i * pointDim + j] - mu[j]; 
+			}
+
+			for(size_t j = 0; j < pointDim; ++j) {
+				for(size_t k = 0; k < pointDim ; ++k) {
+					cpuSigmaSum[j * pointDim + k] += a * xm[j] * xm[k];
+				}
+			}
+		}
+
+		for(size_t i = 0; i < pointDim * pointDim; ++i) {
+			sigma[i] += cpuSigmaSum[i];
 		}
 	}
 }

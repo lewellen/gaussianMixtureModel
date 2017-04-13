@@ -90,6 +90,8 @@ struct GMM* cudaFit(
 				& logpi[k], gmm->components[k].mu, gmm->components[k].sigma
 			);
 
+			gmm->components[k].pi = exp(logpi[k]);
+
 			prepareCovariance(& gmm->components[k], pointDim);
 		}
 	} while (1 == 1);

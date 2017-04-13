@@ -16,14 +16,33 @@ __global__ void kernCalcLogGammaNK(
 
 __global__ void kernCalcMu(
 	const size_t numPoints, const size_t pointDim,
-	const double* X, const double* loggamma, const double logGammaSum,
+	const double* X, const double* loggamma, const double logGammaK,
 	double* dest
 );
 
 __global__ void kernCalcSigma(
 	const size_t numPoints, const size_t pointDim,
-	const double* X, const double* mu, const double* loggamma, const double logGammaSum,
+	const double* X, const double* mu, const double* loggamma, const double logGammaK,
 	double* dest
 );
 	
+__host__ void cudaUpdateMu(
+	cudaDeviceProp* deviceProp,
+	const size_t numPoints, const size_t pointDim,
+	const size_t M,
+	const double* X, const double* loggamma, const double logGammaK,
+	const double* device_X, const double* device_loggamma,
+	double* mu
+);
+
+__host__ void cudaUpdateSigma(
+	cudaDeviceProp* deviceProp,
+	const size_t numPoints, const size_t pointDim,
+	const size_t M,
+	const double* X, const double* loggamma, const double logGammaK,
+	const double* device_X, const double* device_loggamma,
+	double* mu, 
+	double* sigma
+);
+
 #endif

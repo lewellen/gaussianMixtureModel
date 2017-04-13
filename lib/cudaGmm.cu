@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "cudaCommon.hu"
+#include "cudaFolds.hu"
 #include "cudaGmm.hu"
 
 __global__ void kernGmmLogLikelihood(

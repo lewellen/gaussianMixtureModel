@@ -7,8 +7,9 @@
 // #include "cudaWrappers.h"
 
 #include "cudaCommon.hu"
-#include "cudaMVNormal.hu"
+#include "cudaFolds.hu"
 #include "cudaGmm.hu"
+#include "cudaMVNormal.hu"
 
 extern "C" void gpuSum(size_t numPoints, const size_t pointDim, double* host_a, double* host_sum) {
 	assert(numPoints > 0);

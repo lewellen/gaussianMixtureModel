@@ -1,0 +1,31 @@
+#ifndef CUDAFOLDS_H
+#define CUDAFOLDS_H
+
+#include <stdlib.h>
+
+/*
+ * Methods to support vector array summation.
+ *
+ */
+__device__ void devVecAdd(size_t pointDim, double* dest, double* src);
+
+__global__ void kernElementWiseSum(const size_t numPoints, const size_t pointDim, double* dest, double* src);
+
+__global__ void kernBlockWiseSum(const size_t numPoints, const size_t pointDim, double* dest);
+
+__host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A);
+
+__host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A, double* host_sum);
+
+
+/*
+ * Methods to support scalar array maximum.
+ *
+ */
+__global__ void kernElementWiseMax(int N, double* dest, double* src);
+
+__global__ void kernBlockWiseMax(double* dest);
+
+__host__ double cudaArrayMax(cudaDeviceProp* deviceProp, const size_t N, double* device_A);
+
+#endif

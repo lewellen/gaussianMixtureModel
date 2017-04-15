@@ -3,8 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <stdio.h>
-
 #include "gmm.h"
 #include "cudaGmm.h"
 #include "util.h"
@@ -62,8 +60,6 @@ struct GMM* cudaFit(
 			loggamma
 		);
 
-		printf("%.16f %.16f\n", prevLogL, currentLogL);
-		
 		assert(maxIterations > 0);
 		--maxIterations;
 		if(!shouldContinue(maxIterations, prevLogL, currentLogL, tolerance)) {

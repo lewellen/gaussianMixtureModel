@@ -2,8 +2,6 @@
 #include <math.h>
 #include <stdlib.h>
 
-#include <stdio.h>
-
 #include "gmm.h"
 #include "seqGmm.h"
 #include "util.h"
@@ -65,8 +63,6 @@ struct GMM* fit(
 			0, numPoints,
 			& currentLogL
 		);
-
-		printf("%.16f %.16f\n", prevLogL, currentLogL);
 
 		assert(maxIterations > 0);
 		--maxIterations;

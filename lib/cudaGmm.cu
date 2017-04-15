@@ -56,7 +56,6 @@ __host__ double cudaGmmLogLikelihoodAndGammaNK(
 	// logP: numComponents x numPoints
 
 	// Do the first M (2^n) points on the gpu; remainder on cpu
-	printf("N: %zu, M: %zu\n", numPoints, M);
 
 	dim3 grid, block;
 	calcDim(M, deviceProp, &block, &grid);

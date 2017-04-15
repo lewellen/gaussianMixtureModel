@@ -37,7 +37,7 @@ void test1DStandardNormalLogGammaK(CalcLogGammaKWrapper target) {
 		double actual = logGamma[k];
 		double absDiff = fabs(expected - actual);
 		if(absDiff >= DBL_EPSILON) {
-			printf("Gamma_{k = %zu} = %.7f, but should equal = %.7f; absDiff = %.15f\n", 
+			printf("Gamma_{k = %zu} = %.16f, but should equal = %.16f; absDiff = %.16f\n", 
 				k, actual, expected, absDiff);
 		}
 

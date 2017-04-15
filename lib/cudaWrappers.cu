@@ -124,7 +124,7 @@ extern "C" void gpuLogMVNormDist(
 
 extern "C" double gpuGmmLogLikelihood(
 	const size_t numPoints, const size_t numComponents,
-	const double* logpi, const double* logP
+	const double* logpi, double* logP
 ) {
 	int deviceId;
 	check(cudaGetDevice(&deviceId));
@@ -135,9 +135,15 @@ extern "C" double gpuGmmLogLikelihood(
 	const size_t M = largestPowTwoLessThanEq(numPoints); 
 
 	double* device_logpi = sendToGpu(numComponents, logpi);
-	double* device_logP = sendToGpu(numComponents * M, logP);
+	
+	// Sending all data because logP is an array organized by:
+	// [ <- numPoints -> ]_0 [ <- numPoints -> ]_... [ <- numPoints -> ]_{k-1}
+	// So even though we are only using M of those points on the GPU,
+	// we need all numPoints to ensure indexing by numPoints * k + i works
+	// correctly to access prob(x_i|mu_k,Sigma_k).
+	double* device_logP = sendToGpu(numComponents * numPoints, logP);
 
-	double logL = cudaGmmLogLikelihood(
+	double logL = cudaGmmLogLikelihoodAndGammaNK(
 		& deviceProp,
 		numPoints, numComponents,
 		M,
@@ -152,31 +158,13 @@ extern "C" double gpuGmmLogLikelihood(
 }
 
 extern "C" void gpuCalcLogGammaNK(
-	const size_t numPoints, const size_t pointDim, const size_t numComponents,
+	const size_t numPoints, const size_t numComponents,
 	const double* logpi, double* loggamma
 ) { 
-	int deviceId;
-	check(cudaGetDevice(&deviceId));
-
-	cudaDeviceProp deviceProp;
-	check(cudaGetDeviceProperties(&deviceProp, deviceId));
-
-	double* device_logpi = sendToGpu(numComponents, logpi);
-	double* device_loggamma = sendToGpu(numComponents * numPoints, loggamma);
-
-	dim3 grid, block;
-	calcDim(numPoints, &deviceProp, &block, &grid);
-	kernCalcLogGammaNK<<<grid, block>>>(
-		numPoints, pointDim, numComponents,
-		device_logpi, device_loggamma
-	);
-
-	cudaMemcpy(loggamma, device_loggamma, numComponents * numPoints * sizeof(double), cudaMemcpyDeviceToHost);
-
-	cudaDeviceSynchronize();
-
-	cudaFree(device_logpi);
-	cudaFree(device_loggamma);
+	gpuGmmLogLikelihood(
+		numPoints, numComponents,
+		logpi, loggamma
+	); 
 }
 
 extern "C" void gpuCalcLogGammaK(
@@ -237,7 +225,7 @@ extern "C" double gpuPerformEStep(
 
 	const size_t M = largestPowTwoLessThanEq(numPoints);
 
-	double logL = cudaGmmLogLikelihood(
+	double logL = cudaGmmLogLikelihoodAndGammaNK(
 		& deviceProp,
 		numPoints, numComponents,
 		M,

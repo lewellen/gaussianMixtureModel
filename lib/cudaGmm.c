@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <stdio.h>
+
 #include "gmm.h"
 #include "cudaGmm.h"
 #include "util.h"
@@ -59,18 +61,14 @@ struct GMM* cudaFit(
 			logpi, Mu, SigmaL,
 			loggamma
 		);
+
+		printf("%.16f %.16f\n", prevLogL, currentLogL);
 		
 		assert(maxIterations > 0);
 		--maxIterations;
 		if(!shouldContinue(maxIterations, prevLogL, currentLogL, tolerance)) {
 			break;
 		}
-
-		// convert loggamma (really p(x_n|mu_k, Sigma_k)) into actual loggamma
-		gpuCalcLogGammaNK(
-			numPoints, pointDim, numComponents, 
-			logpi, loggamma
-		);
 
 		// Let Gamma[component] = \Sum_point gamma[component, point]
 		gpuCalcLogGammaK(

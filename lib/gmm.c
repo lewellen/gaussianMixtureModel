@@ -122,7 +122,7 @@ void logLikelihood(
 		double sum = 0.0;
 		for (size_t k = 0; k < numComponents; ++k) {
 			const double logProbK = logpi[k] + logProb[k * numPoints + point];
-			sum = exp(logProbK - maxArg);
+			sum += exp(logProbK - maxArg);
 		}
 
 		assert(sum >= 0);
@@ -186,6 +186,45 @@ void calcLogGammaNK(
 		const double logpx = maxArg + log(sum);
 		for(size_t k = 0; k < numComponents; ++k) {
 			loggamma[k * numPoints + point] += -logpx;
+		}
+	}
+}
+
+void logLikelihoodAndGammaNK(
+	const double* logpi, const size_t numComponents,
+	double* logProb, const size_t numPoints,
+	const size_t pointStart, const size_t pointEnd,
+	double* logL
+) {
+	assert(logpi != NULL);
+	assert(numComponents > 0);
+	assert(logProb != NULL);
+	assert(numPoints > 0);
+	assert(pointStart < pointEnd);
+	assert(pointEnd <= numPoints);
+	assert(logL != NULL);
+
+	*logL = 0.0;
+	for (size_t point = pointStart; point < pointEnd; ++point) {
+		double maxArg = -INFINITY;
+		for(size_t k = 0; k < numComponents; ++k) {
+			const double logProbK = logpi[k] + logProb[k * numPoints + point];
+			if(logProbK > maxArg) {
+				maxArg = logProbK;
+			}
+		}
+
+		double sum = 0.0;
+		for (size_t k = 0; k < numComponents; ++k) {
+			const double logProbK = logpi[k] + logProb[k * numPoints + point];
+			sum += exp(logProbK - maxArg);
+		}
+
+		assert(sum >= 0);
+		const double logpx = maxArg + log(sum);
+		*logL += logpx;
+		for(size_t k = 0; k < numComponents; ++k) {
+			logProb[k * numPoints + point] += -logpx;
 		}
 	}
 }

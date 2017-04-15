@@ -27,7 +27,7 @@ void choleskyDecomposition(const double* A, const size_t pointDim, double* L) {
 			double b = A[j * pointDim + i];
 			double absDiff = fabs(a - b);
 			if(absDiff >= 2.0 * DBL_EPSILON) {
-				fprintf(stdout, "A[%zu, %zu] should be symmetric (%f != %f). absdiff: %.15f\n", 
+				fprintf(stdout, "A[%zu, %zu] should be symmetric (%f != %f). absdiff: %.16f\n", 
 					i, j, a, b, absDiff);
 				//assert(0);
 			}

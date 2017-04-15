@@ -72,7 +72,7 @@ void* parallelFitStart(void* untypedArgs) {
 		arriveAt(sargs->barrier, NULL, NULL);
 
 		// parallel across points
-		logLikelihood(
+		logLikelihoodAndGammaNK(
 			logpi, numComponents,
 			loggamma, numPoints,
 			args->pointStart, args->pointEnd,
@@ -85,6 +85,7 @@ void* parallelFitStart(void* untypedArgs) {
 			break;
 		}
 
+		/*
 		// Parallelism here is ugly since it's spread across points instead of 
 		// components like everything else. Ugly cache behavior on 
 		// gamm_{n, k} /= sum.
@@ -93,6 +94,7 @@ void* parallelFitStart(void* untypedArgs) {
 			args->pointStart, args->pointEnd, 
 			loggamma, numPoints
 		);
+		*/
 
 		arriveAt(sargs->barrier, NULL, NULL);
 

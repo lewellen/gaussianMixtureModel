@@ -49,6 +49,13 @@ void calcLogGammaNK(
 	double* loggamma, const size_t numPoints
 );
 
+void logLikelihoodAndGammaNK(
+	const double* logpi, const size_t numComponents,
+	double* logProb, const size_t numPoints,
+	const size_t pointStart, const size_t pointEnd,
+	double* logL
+);
+
 void calcLogGammaK(
 	const double* loggamma, const size_t numPoints,
 	const size_t componentStart, const size_t componentEnd,

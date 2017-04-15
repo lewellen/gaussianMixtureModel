@@ -3,24 +3,20 @@
 
 #include <stdlib.h>
 
-__global__ void kernGmmLogLikelihood(
-	const size_t numPoints, const size_t numComponents,
-	const double* logPi, const double* logP,
-	double* logL
+__global__ void kernCalcLogLikelihoodAndGammaNK(
+	const size_t M, const size_t numPoints, const size_t numComponents,
+	const double* logpi, double* logPx, double* loggamma
 );
 
-__host__ double cudaGmmLogLikelihood(
+__host__ double cudaGmmLogLikelihoodAndGammaNK(
 	cudaDeviceProp* deviceProp,
 	const size_t numPoints, const size_t numComponents,
 	const size_t M,
-	const double* logpi, const double* logP,
-	const double* device_logpi, const double* device_logP
+	const double* logpi, double* logP,
+	const double* device_logpi, double* device_logP
 );
 
-__global__ void kernCalcLogGammaNK(
-	const size_t numPoints, const size_t pointDim, const size_t numComponents,
-	const double* logpi, double* loggamma
-);
+
 
 __global__ void kernCalcMu(
 	const size_t numPoints, const size_t pointDim,
@@ -28,12 +24,6 @@ __global__ void kernCalcMu(
 	double* dest
 );
 
-__global__ void kernCalcSigma(
-	const size_t numPoints, const size_t pointDim,
-	const double* X, const double* mu, const double* loggamma, const double logGammaK,
-	double* dest
-);
-	
 __host__ void cudaUpdateMu(
 	cudaDeviceProp* deviceProp,
 	const size_t numPoints, const size_t pointDim,
@@ -43,6 +33,14 @@ __host__ void cudaUpdateMu(
 	double* mu
 );
 
+
+
+__global__ void kernCalcSigma(
+	const size_t numPoints, const size_t pointDim,
+	const double* X, const double* mu, const double* loggamma, const double logGammaK,
+	double* dest
+);
+	
 __host__ void cudaUpdateSigma(
 	cudaDeviceProp* deviceProp,
 	const size_t numPoints, const size_t pointDim,

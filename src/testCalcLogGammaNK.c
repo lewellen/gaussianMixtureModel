@@ -13,9 +13,9 @@
 #include "gmm.h"
 #include "cudaWrappers.h"
 
-typedef void (*CalcLogGammaNKWrapper)(const size_t, const size_t, const size_t, const double*, double*);
+typedef void (*CalcLogGammaNKWrapper)(const size_t, const size_t, const double*, double*);
 
-void test1DStandardNormalLogGammaNK(CalcLogGammaNKWrapper target) {
+void test1DStandardNormalLogGammaNK(int gnkIncPik, CalcLogGammaNKWrapper target) {
 	const size_t pointDim = 1;
 	const size_t numPoints = 1024;
 	const size_t numComponents = 1;
@@ -54,13 +54,13 @@ void test1DStandardNormalLogGammaNK(CalcLogGammaNKWrapper target) {
 	double logPi[numComponents];
 	double uniformPi = 1.0 / (double)numComponents;
 	for(size_t k = 0; k < numComponents; ++k) {
-		logPi[k] = uniformPi;
+		logPi[k] = log(uniformPi);
 	}
 
 	double loggamma[numPoints];
 	memcpy(loggamma, logP, numPoints * sizeof(double));
 
-	target(numPoints, pointDim, numComponents, logPi, loggamma);
+	target(numPoints, numComponents, logPi, loggamma);
 
 	for(size_t i = 0; i < numPoints; ++i) {
 		double sum = 0;
@@ -75,10 +75,13 @@ void test1DStandardNormalLogGammaNK(CalcLogGammaNKWrapper target) {
 			assert(actual == actual);
 
 			double expected = logP[k * numPoints + i] - sum;
+			if(gnkIncPik) {
+				expected += logPi[k];
+			}
 
 			double absDiff = fabs(expected - actual);
 			if(absDiff >= DBL_EPSILON) {
-				printf("gamma_{n = %zu, k = %zu} = %.7f, but should equal = %.7f; absDiff = %.15f\n", 
+				printf("gamma_{n = %zu, k = %zu} = %.16f, but should equal = %.16f; absDiff = %.16f\n", 
 					i, k, actual, expected, absDiff);
 			}
 
@@ -88,22 +91,22 @@ void test1DStandardNormalLogGammaNK(CalcLogGammaNKWrapper target) {
 }
 
 void cpuCalcLogGammaNKWrapper(
-	const size_t numPoints, const size_t pointDim, const size_t numComponents,
+	const size_t numPoints, const size_t numComponents,
 	const double* logPi, double* logP
 ) {
 	calcLogGammaNK(logPi, numComponents, 0, numPoints, logP, numPoints);
 }
 
 void gpuCalcLogGammaNKWrapper(
-	const size_t numPoints, const size_t pointDim, const size_t numComponents,
+	const size_t numPoints, const size_t numComponents,
 	const double* logPi, double* logP
 ) {
-	gpuCalcLogGammaNK(numPoints, pointDim, numComponents, logPi, logP);
+	gpuCalcLogGammaNK(numPoints, numComponents, logPi, logP);
 }
 
 int main(int argc, char** argv) {
-	test1DStandardNormalLogGammaNK(cpuCalcLogGammaNKWrapper);
-	test1DStandardNormalLogGammaNK(gpuCalcLogGammaNKWrapper);
+	test1DStandardNormalLogGammaNK(1, cpuCalcLogGammaNKWrapper);
+	test1DStandardNormalLogGammaNK(1, gpuCalcLogGammaNKWrapper);
 
 	printf("PASS: %s\n", argv[0]);
 	return EXIT_SUCCESS;

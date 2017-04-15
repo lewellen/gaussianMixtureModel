@@ -60,7 +60,7 @@ void test1DStandardNormal( test1DStandardNormalWrapper target ) {
 
 		double absDiff = fabs(expected - actual);
 		if(absDiff >= DBL_EPSILON) {
-			printf("f(%.7f) = %.7f, but should equal = %.7f; absDiff = %.15f\n", 
+			printf("f(%.16f) = %.16f, but should equal = %.16f; absDiff = %.16f\n", 
 				x, actual, expected, absDiff);
 		}
 
@@ -133,7 +133,7 @@ void test1DStandardNormalParallelRun() {
 
 		double absDiff = fabs(seqValue - cudaValue);
 		if(absDiff >= DBL_EPSILON) {
-			printf("Seq. f(%.7f) = %.7f, but Cuda f(%.7f) = %.7f; absDiff = %.15f\n", 
+			printf("Seq. f(%.16f) = %.16f, but Cuda f(%.16f) = %.16f; absDiff = %.16f\n", 
 				x, x, seqValue, cudaValue, absDiff);
 		}
 

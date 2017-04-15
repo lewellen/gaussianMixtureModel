@@ -20,11 +20,11 @@ extern void gpuLogMVNormDist(
 
 extern double gpuGmmLogLikelihood(
 	const size_t numPoints, const size_t numComponents,
-	const double* logPi, const double* logP
+	const double* logPi, double* logP
 );
 
 extern void gpuCalcLogGammaNK(
-	const size_t numPoints, const size_t pointDim, const size_t numComponents,
+	const size_t numPoints, const size_t numComponents,
 	const double* logpi, double* loggamma
 );
 

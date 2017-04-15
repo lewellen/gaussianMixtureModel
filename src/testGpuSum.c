@@ -42,7 +42,7 @@ void test1DEvens() {
 
 		double absDiff = fabs(host_sum - device_sum);
 		if(absDiff >= DBL_EPSILON) {
-			printf("N: %zu, host_sum: %.15f, device_sum: %.15f, absDiff: %.15f\n", 
+			printf("N: %zu, host_sum: %.16f, device_sum: %.16f, absDiff: %.16f\n", 
 				N, host_sum, device_sum, absDiff
 				);
 		}
@@ -87,7 +87,7 @@ void test2DOdds() {
 
 			double absDiff = fabs(host_sum[i] - device_sum[i]);
 			if(absDiff >= DBL_EPSILON) {
-				printf("N: %zu, i: %zu, host_sum: %.15f, device_sum: %.15f, absDiff: %.15f\n", 
+				printf("N: %zu, i: %zu, host_sum: %.16f, device_sum: %.16f, absDiff: %.16f\n", 
 					N, i, host_sum[i], device_sum[i], absDiff
 					);
 			}

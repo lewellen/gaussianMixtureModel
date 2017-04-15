@@ -38,7 +38,7 @@ void testEvens() {
 
 		double absDiff = fabs(host_max - device_max);
 		if(absDiff >= DBL_EPSILON) {
-			printf("N: %zu, host_max: %.15f, device_max: %.15f, absDiff: %.15f\n", 
+			printf("N: %zu, host_max: %.16f, device_max: %.16f, absDiff: %.16f\n", 
 				N, host_max, device_max, absDiff
 				);
 		}
@@ -64,7 +64,7 @@ void testOdds() {
 
 		double absDiff = fabs(host_max - device_max);
 		if(absDiff >= DBL_EPSILON) {
-			printf("N: %zu, host_max: %.15f, device_max: %.15f, absDiff: %.15f\n", 
+			printf("N: %zu, host_max: %.16f, device_max: %.16f, absDiff: %.16f\n", 
 				N, host_max, device_max, absDiff
 				);
 		}

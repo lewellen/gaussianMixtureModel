@@ -2,6 +2,8 @@
 #include <math.h>
 #include <stdlib.h>
 
+#include <stdio.h>
+
 #include "gmm.h"
 #include "seqGmm.h"
 #include "util.h"
@@ -52,26 +54,25 @@ struct GMM* fit(
 		// passing in precomputed gamma values. Also moved loop termination here
 		// since likelihood determines termination. Result: 1.3x improvement in 
 		// execution time.  (~8 ms to ~6 ms on oldFaithful.dat)
+		// 2017-04-14 GEL Decided to fuse logLikelihood and Gamma NK calculation
+		// since they both rely on the log p(x) calculation, and it would be 
+		// wasteful to compute and store p(x), since log L and gamma NK are only
+		// consumers of that data.
 		prevLogL = currentLogL;
-		logLikelihood(
+		logLikelihoodAndGammaNK(
 			logpi, numComponents, 
 			loggamma, numPoints,
 			0, numPoints,
 			& currentLogL
 		);
 
+		printf("%.16f %.16f\n", prevLogL, currentLogL);
+
 		assert(maxIterations > 0);
 		--maxIterations;
 		if(!shouldContinue(maxIterations, prevLogL, currentLogL, tolerance)) {
 			break;
 		}
-
-		// convert loggamma (really p(x_n|mu_k, Sigma_k)) into actual loggamma
-		calcLogGammaNK(
-			logpi, numComponents, 
-			0, numPoints, 
-			loggamma, numPoints
-		);
 
 		// Let Gamma[component] = \Sum_point gamma[component, point]
 		calcLogGammaK(

@@ -11,6 +11,89 @@
 #include "cudaGmm.hu"
 #include "cudaMVNormal.hu"
 
+struct GmmEmGpuCtx {
+	size_t numPoints;
+	size_t pointDim;
+	size_t numComponents;
+
+	double* X;
+	double* logpi;
+	double* mu;
+	double* sigmaL;
+	double* loggamma;
+
+	size_t M;
+	cudaDeviceProp* deviceProp;
+	double* device_X;
+	double* device_logpi;
+	double* device_mu;
+	double* device_sigmaL;
+	double* device_loggamma;
+};
+
+extern "C" struct GmmEmGpuCtx* gpuInitCtx(
+	size_t numPoints,
+	size_t pointDim,
+	size_t numComponents,
+	double* X,
+	double* logpi,
+	double* mu,
+	double* sigmaL,
+	double* loggamma
+) {
+	assert(numPoints > 0);
+	assert(pointDim > 0);
+	assert(numComponents > 0);
+
+	assert(X != NULL);
+	assert(logpi != NULL);
+	assert(mu != NULL);
+	assert(sigmaL != NULL);
+	assert(loggamma != NULL);
+
+	struct GmmEmGpuCtx* ctx = (struct GmmEmGpuCtx*) malloc(sizeof(struct GmmEmGpuCtx));
+
+	ctx->numPoints = numPoints;
+	ctx->pointDim = pointDim;
+	ctx->numComponents = numComponents;
+	
+	ctx->X = X;
+	ctx->logpi = logpi;
+	ctx->mu = mu;
+	ctx->sigmaL = sigmaL;
+	ctx->loggamma = loggamma;
+
+	int deviceId;
+	check(cudaGetDevice(&deviceId));
+
+	ctx->deviceProp = (cudaDeviceProp*) malloc(sizeof(cudaDeviceProp));
+	check(cudaGetDeviceProperties(ctx->deviceProp, deviceId));
+
+	ctx->M = largestPowTwoLessThanEq(numPoints);
+
+	check(ctx->device_X = sendToGpu(numPoints * pointDim, X));
+	check(ctx->device_logpi = sendToGpu(numComponents, logpi));
+	check(ctx->device_mu = sendToGpu(numComponents * pointDim, mu));
+	check(ctx->device_sigmaL = sendToGpu(numComponents * pointDim * pointDim, sigmaL));
+	check(ctx->device_loggamma = sendToGpu(numPoints * pointDim, loggamma));
+
+	return ctx;
+}
+
+extern "C" void gpuDestroyCtx(
+	struct GmmEmGpuCtx* ctx
+) {
+	assert(ctx != NULL);
+	cudaFree(ctx->device_X);
+	cudaFree(ctx->device_logpi);
+	cudaFree(ctx->device_mu);
+	cudaFree(ctx->device_sigmaL);
+	cudaFree(ctx->device_loggamma);
+
+	free(ctx->deviceProp);
+	free(ctx);
+}
+
 extern "C" void gpuSum(size_t numPoints, const size_t pointDim, double* host_a, double* host_sum) {
 	assert(numPoints > 0);
 	assert(pointDim > 0);
@@ -189,117 +272,73 @@ extern "C" void gpuCalcLogGammaK(
  		logGamma[k] = maxValue + log(sum );
 	}
 	free(working);
-}
 
 extern "C" double gpuPerformEStep(
-	const size_t numPoints, const size_t pointDim, const size_t numComponents,
-	const double* X, 
-	const double* logpi, const double* Mu, const double* SigmaL,
-	double* logP
+	struct GmmEmGpuCtx* ctx
 ) {
-	int deviceId;
-	check(cudaGetDevice(&deviceId));
+	assert(ctx != NULL);
 
-	cudaDeviceProp deviceProp;
-	check(cudaGetDeviceProperties(&deviceProp, deviceId));
-
-	double* device_X = sendToGpu(numPoints * pointDim, X);
-
-	double* device_logpi = sendToGpu(numComponents, logpi);
-	double* device_Mu = sendToGpu(pointDim * numComponents, Mu);
-	double* device_SigmaL = sendToGpu(pointDim * pointDim * numComponents, SigmaL);
-
-	double* device_logP = mallocOnGpu(numPoints * numComponents);
+	check(cudaMemcpy(ctx->device_mu, ctx->mu, ctx->numComponents * ctx->pointDim * sizeof(double), cudaMemcpyHostToDevice));
+	check(cudaMemcpy(ctx->device_mu, ctx->sigma, ctx->numComponents * ctx->pointDim * ctx->pointDim * sizeof(double), cudaMemcpyHostToDevice));
 
 	dim3 grid, block;
-	calcDim(numPoints, &deviceProp, &block, &grid);
-	for(size_t k = 0; k < numComponents; ++k) {
+	calcDim(ctx->numPoints, ctx->deviceProp, &block, &grid);
+	for(size_t k = 0; k < ctx->numComponents; ++k) {
 		kernLogMVNormDist<<<grid, block>>>(
-			numPoints, pointDim,
-			device_X, 
-			& device_Mu[k * pointDim], 
-			& device_SigmaL[k * pointDim * pointDim],
-			& device_logP[k * numPoints]
+			ctx->numPoints, ctx->pointDim,
+			ctx->device_X, 
+			& ctx->device_mu[k * ctx->pointDim], 
+			& ctx->device_sigmaL[k * ctx->pointDim * ctx->pointDim],
+			& ctx->device_loggamma[k * ctx->numPoints]
 		);
 	}
 
-	const size_t M = largestPowTwoLessThanEq(numPoints);
-
 	double logL = cudaGmmLogLikelihoodAndGammaNK(
-		& deviceProp,
-		numPoints, numComponents,
-		M,
-		logpi, logP,
-		device_logpi, device_logP
+		ctx->deviceProp,
+		ctx->numPoints, ctx->numComponents,
+		ctx->M,
+		ctx->logpi, ctx->loggamma,
+		ctx->device_logpi, ctx->device_loggamma
 	);
 
-	cudaFree(device_X);
-
-	cudaFree(device_logpi);
-	cudaFree(device_Mu);
-	cudaFree(device_SigmaL);
-
+	// decide if necessary to keep
 	check(cudaMemcpy(logP, device_logP, 
 		numPoints * numComponents * sizeof(double), cudaMemcpyDeviceToHost));
-
-	cudaFree(device_logP);
 
 	return logL;
 }
 
 extern "C" void gpuPerformMStep(
-	const size_t numPoints, const size_t pointDim,
-	const double* X, 
-	double* loggamma, double logGammaK, double logGammaSum,
-	double* logpik, double* mu, double* sigma
+	struct GmmEmGpuCtx* ctx
 ) {
-	// X: pointDim x numPoints
-	// loggamma: 1 x numPoints
-	// logGamma: 1 x 1
-	// logGammaSum: 1 x 1
-	// logPi: 1 x 1
-	// mu: 1 x pointDim
-	// sigma: pointDim x pointDim
+	for(size_t k = 0; k < numComponents; ++k) {
+		// update pi_+1
+		*logpi[k] += logGamma[k] - logGammaSum;
 
-	int deviceId;
-	check(cudaGetDevice(&deviceId));
+		// calculate mu_+1
+		cudaUpdateMu(
+			ctx->deviceProp,
+			ctx->numPoints, ctx->pointDim,
+			ctx->M,
+			ctx->X, & ctx->loggamma[k * numPoints], ctx->logGamma[k],
+			ctx->device_X, & ctx->device_loggamma[k * numPoints],
+			& ctx->mu[k * pointDim]
+		);
 
-	cudaDeviceProp deviceProp;
-	check(cudaGetDeviceProperties(&deviceProp, deviceId));
+		cudaDeviceSynchronize();
 
-	const size_t M = largestPowTwoLessThanEq(numPoints);
+		// Calculate sigma_+1
+		cudaUpdateSigma(
+			ctx->deviceProp,
+			ctx->numPoints, ctx->pointDim,
+			ctx->M,
+			ctx->X, & ctx->loggamma[k * ctx->numPoints], logGamma[k],
+			ctx->device_X, & ctx->device_loggamma[k * ctx->numPoints],
+			ctx->mu[k * ctx->pointDim], 
+			ctx->sigma[k * ctx->pointDim * ctx->pointDim];
+		);
 
-	double* device_X = sendToGpu(M * pointDim, X);
-	double* device_loggamma = sendToGpu(M, loggamma);
+		// doing the cholesky decomposition is caller (cpu) side for now
+	}
 
-	// update pi_+1
-	*logpik += logGammaK - logGammaSum;
-
-	// calculate mu_+1
-	cudaUpdateMu(
-		& deviceProp,
-		numPoints, pointDim,
-		M,
-		X, loggamma, logGammaK,
-		device_X, device_loggamma,
-		mu
-	);
-
-	cudaDeviceSynchronize();
-
-	// Calculate sigma_+1
-	cudaUpdateSigma(
-		& deviceProp,
-		numPoints, pointDim,
-		M,
-		X, loggamma, logGammaK,
-		device_X, device_loggamma,
-		mu, 
-		sigma
-	);
-
-	cudaFree(device_X);
-	cudaFree(device_loggamma);
-
-	// doing the cholesky decomposition is caller (cpu) side for now
 }

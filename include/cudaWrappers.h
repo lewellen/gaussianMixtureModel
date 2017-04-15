@@ -3,6 +3,25 @@
 
 #include <stdlib.h>
 
+struct GmmEmGpuCtx;
+
+extern struct GmmEmGpuCtx* gpuInitCtx(
+	size_t numPoints,
+	size_t pointDim,
+	size_t numComponents,
+	double* X,
+	double* logpi,
+	double* mu,
+	double* sigmaL,
+	double* loggamma
+);
+
+extern void gpuDestroyCtx(
+	struct GmmEmGpuCtx* ctx
+);
+
+
+
 extern void gpuSum(
 	size_t numPoints, size_t pointDim, 
 	double* host_a, double* host_sum
@@ -11,6 +30,8 @@ extern void gpuSum(
 extern double gpuMax(
 	const size_t N, double* a
 );
+
+
 
 extern void gpuLogMVNormDist(
 	const size_t numPoints, const size_t pointDim,

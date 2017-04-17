@@ -13,7 +13,7 @@ __global__ void kernElementWiseSum(const size_t numPoints, const size_t pointDim
 
 __global__ void kernBlockWiseSum(const size_t numPoints, const size_t pointDim, double* dest);
 
-__host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A);
+__host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A, cudaStream_t stream = 0);
 
 __host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A, double* host_sum);
 

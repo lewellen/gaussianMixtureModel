@@ -226,6 +226,10 @@ extern "C" void gpuGmmFit(
 	cudaDeviceProp deviceProp;
 	check(cudaGetDeviceProperties(&deviceProp, deviceId));
 
+	printf("name: %s\n", deviceProp.name);
+	printf("multiProcessorCount: %d\n", deviceProp.multiProcessorCount);
+	printf("concurrentKernels: %d\n", deviceProp.concurrentKernels);
+
 	double* device_X = sendToGpu(numPoints * pointDim, X);
 
 	for(size_t i = 0; i < numComponents; ++i) {
@@ -249,7 +253,7 @@ extern "C" void gpuGmmFit(
 	// logPx, mu, sigma reductions
 	// This means for mu and sigma can only do one component at a time otherwise 
 	// the memory foot print will limit how much data we can actually work with.
-	double* device_working = mallocOnGpu(numPoints * pointDim * pointDim * numComponents);
+	double* device_working = mallocOnGpu(numComponents * numPoints * pointDim * pointDim);
 
 	dim3 grid, block;
 	calcDim(numPoints, &deviceProp, &block, &grid);
@@ -257,6 +261,11 @@ extern "C" void gpuGmmFit(
 	size_t iteration = 0;
 	const size_t maxIterations = 100;
 	const double tolerance = 1e-8;
+
+	cudaStream_t streams[numComponents];
+	for(size_t k = 0; k < numComponents; ++k) {
+		cudaStreamCreate(&streams[k]);
+	}
 
 	do {
 		// --------------------------------------------------------------------------
@@ -266,7 +275,7 @@ extern "C" void gpuGmmFit(
 		// loggamma[k * numPoints + i] = p(x_i | mu_k, Sigma_k )
 		for(size_t k = 0; k < numComponents; ++k) {
 			// Fill in numPoint many probabilities
-			kernLogMVNormDist<<<grid, block>>>(
+			kernLogMVNormDist<<<grid, block, 0, streams[k]>>>(
 				numPoints, pointDim,
 				device_X, 
 				& device_Mu[k * pointDim], 
@@ -274,9 +283,6 @@ extern "C" void gpuGmmFit(
 				& device_loggamma[k * numPoints]
 			);
 		}
-
-		// Need all of the above log prob (x_i | ...) value before we can continue
-		cudaDeviceSynchronize();
 
 		// loggamma[k * numPoints + i] = p(x_i | mu_k, Sigma_k) / p(x_i)
 		// working[i] = p(x_i)
@@ -288,7 +294,7 @@ extern "C" void gpuGmmFit(
 		// working[0] = sum_{i} p(x_i)
 		cudaArraySum(&deviceProp, numPoints, 1, device_working);
 
-		previousLogL = currentLogL;		
+		previousLogL = currentLogL;
 		check(cudaMemcpy(
 			&currentLogL, device_working, 
 			sizeof(double), 
@@ -299,72 +305,79 @@ extern "C" void gpuGmmFit(
 			break;
 		}
 
-		// logGamma = loggamma
-		check(cudaMemcpy(
-			device_logGamma, device_loggamma, 
-			numPoints * numComponents * sizeof(double), 
-			cudaMemcpyDeviceToDevice
-		));
-
-		for(size_t k = 0; k < numComponents; ++k) {
-			kernExp<<<grid, block>>>(&device_logGamma[k * numPoints]);
-		}
-
-		cudaDeviceSynchronize();
-
-		// logGamma[k * numPoints + 0] = sum_{i} loggamma[k * numPoints + i]
-		for(size_t k = 0; k < numComponents; ++k) {
-			cudaArraySum(&deviceProp, numPoints, 1, & device_logGamma[k * numPoints]);
-		}
-
 		// --------------------------------------------------------------------------
 		// M-Step
 		// --------------------------------------------------------------------------
 
 		for(size_t k = 0; k < numComponents; ++k) {
+			// logGamma = loggamma
+			check(cudaMemcpyAsync(
+				& device_logGamma[k * numPoints], & device_loggamma [k * numPoints], 
+				numPoints * sizeof(double), 
+				cudaMemcpyDeviceToDevice,
+				streams[k]
+			));
+		}
+
+		for(size_t k = 0; k < numComponents; ++k) {
+			kernExp<<<grid, block, 0, streams[k]>>>(&device_logGamma[k * numPoints]);
+			// logGamma[k * numPoints + 0] = sum_{i} loggamma[k * numPoints + i]
+			cudaArraySum(&deviceProp, numPoints, 1, & device_logGamma[k * numPoints], streams[k]);
+
 			// working[i * pointDim + j] = gamma_ik / Gamma K * x_j
-			kernCalcMu<<<grid, block>>>(
+			kernCalcMu<<<grid, block, 0, streams[k]>>>(
 				numPoints, pointDim,
 				device_X, 
 				& device_loggamma[k * numPoints], 
 				& device_logGamma[k * numPoints],
-				device_working
+				& device_working[k * numPoints * pointDim]
 			);
-
 			// working[0 + j] = sum gamma_ik / Gamma K * x_j
-			cudaArraySum(&deviceProp, numPoints, pointDim, device_working);
+			cudaArraySum(&deviceProp, numPoints, pointDim, & device_working[k * numPoints * pointDim], streams[k]);
+		}
 
-			check(cudaMemcpy(
+		for(size_t k = 0; k < numComponents; ++k) {
+			check(cudaMemcpyAsync(
 				& device_Mu[k * pointDim],
-				device_working,
+				& device_working[k * pointDim * numPoints],
 				pointDim * sizeof(double),
-				cudaMemcpyDeviceToDevice
+				cudaMemcpyDeviceToDevice,
+				streams[k]
 			));
+		}
 
+		for(size_t k = 0; k < numComponents; ++k) {
 			// working[i * pointDim * pointDim + j] = 
 			// 	gamma_ik / Gamma_k [ (x_i - mu) (x_i - mu)^T ]_j
-			kernCalcSigma<<<grid, block>>>(
+			kernCalcSigma<<<grid, block, 0, streams[k]>>>(
 				numPoints, pointDim,
 				device_X, 
 				& device_Mu[k * pointDim],
 				& device_loggamma[k * numPoints],
 				& device_logGamma[k * numPoints],
-				device_working
+				& device_working[k * pointDim * pointDim * numPoints]
 			);
-
 			// working[0 + j] = sum gamma_ik / Gamma K * [...]_j
-			cudaArraySum(&deviceProp, numPoints, pointDim * pointDim, device_working);
-
-			check(cudaMemcpy(
-				& device_Sigma[k * pointDim * pointDim],
-				device_working,
-				pointDim * pointDim * sizeof(double),
-				cudaMemcpyDeviceToDevice
-			));
-		
-			cudaDeviceSynchronize();		
+			cudaArraySum(
+				&deviceProp, numPoints, pointDim * pointDim, 
+				&device_working[k * pointDim * pointDim * numPoints], streams[k]
+			);
 		}
-		
+
+		for(size_t k = 0; k < numComponents; ++k) {
+			check(cudaMemcpyAsync(
+				& device_Sigma[k * pointDim * pointDim],
+				& device_working[k * pointDim * pointDim * numPoints],
+				pointDim * pointDim * sizeof(double),
+				cudaMemcpyDeviceToDevice,
+				streams[k]
+			));
+		}
+
+		for(size_t k = 0; k < numComponents; ++k) {
+			cudaStreamSynchronize(streams[k]);
+		}		
+
 		// pi_k^(t+1) = pi_k Gamma_k / sum_{i}^{K} pi_i * Gamma_i
 		// Use thread sync to compute denom to avoid data race
 		kernUpdatePi<<<1, numComponents>>>(
@@ -378,10 +391,12 @@ extern "C" void gpuGmmFit(
 			device_Sigma, device_SigmaL,
 			device_normalizers
 		);	
-
-		cudaDeviceSynchronize();		
 	
 	} while(++iteration < maxIterations);
+
+	for(size_t k = 0; k < numComponents; ++k) {
+		cudaStreamDestroy(streams[k]);
+	}
 
 	cudaFree(device_working);
 

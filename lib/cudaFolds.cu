@@ -35,7 +35,7 @@ __global__ void kernBlockWiseSum(const size_t numPoints, const size_t pointDim, 
 }
 
 
-__host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A) {
+__host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A, cudaStream_t stream) {
 	assert(deviceProp != NULL);
 	assert(numPoints > 0);
 	assert(pointDim > 0);
@@ -45,9 +45,10 @@ __host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const s
 	if(M != numPoints) {
 		dim3 block , grid;
 		calcDim(M, deviceProp, &block, &grid);
-		kernElementWiseSum<<<grid, block>>>(
+		kernElementWiseSum<<<grid, block, 0, stream>>>(
 			numPoints - M, pointDim, device_A, device_A + M * pointDim
 		);
+		numPoints = M;
 	}
 
 	// Parallel sum by continually folding the array in half and adding the right 
@@ -57,14 +58,16 @@ __host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const s
 		dim3 block, grid;
 		for(numPoints /= 2; numPoints >= 1024; numPoints /= 2) {
 			calcDim(numPoints, deviceProp, &block, &grid);
-			kernElementWiseSum<<<grid, block>>>(
+			kernElementWiseSum<<<grid, block, 0, stream>>>(
 				numPoints, pointDim, device_A, device_A + numPoints * pointDim
 			);
 		}
 		numPoints *= 2;
 	}
- 
-	kernBlockWiseSum<<<1, numPoints>>>(
+
+	assert(numPoints <= 1024);
+
+	kernBlockWiseSum<<<1, numPoints, 0, stream>>>(
 		numPoints, pointDim, device_A
 	);
 }

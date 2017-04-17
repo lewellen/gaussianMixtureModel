@@ -5,23 +5,19 @@
 
 struct GmmEmGpuCtx;
 
-extern struct GmmEmGpuCtx* gpuInitCtx(
-	size_t numPoints,
-	size_t pointDim,
-	size_t numComponents,
-	double* X,
-	double* logpi,
-	double* mu,
-	double* sigmaL,
-	double* loggamma
+extern void gpuGmmFit(
+	const double* X,
+	const size_t numPoints, 
+	const size_t pointDim, 
+	const size_t numComponents,
+	double* pi,
+	double* Mu,
+	double* Sigma,
+	double* SigmaL,
+	double* normalizers
 );
 
-extern void gpuDestroyCtx(
-	struct GmmEmGpuCtx* ctx
-);
-
-
-
+// Wrappers for unit testing
 extern void gpuSum(
 	size_t numPoints, size_t pointDim, 
 	double* host_a, double* host_sum
@@ -30,8 +26,6 @@ extern void gpuSum(
 extern double gpuMax(
 	const size_t N, double* a
 );
-
-
 
 extern void gpuLogMVNormDist(
 	const size_t numPoints, const size_t pointDim,
@@ -52,23 +46,6 @@ extern void gpuCalcLogGammaNK(
 extern void gpuCalcLogGammaK(
 	const size_t numPoints, const size_t numComponents,
 	const double* loggamma, double* logGamma
-);
-
-
-
-
-extern double gpuPerformEStep(
-	const size_t numPoints, const size_t pointDim, const size_t numComponents,
-	const double* X, 
-	const double* logpi, const double* mu, const double* sigma,
-	double* logP
-);
-
-extern void gpuPerformMStep(
-	const size_t numPoints, const size_t pointDim,
-	const double* X, 
-	double* loggamma, double logGammaK, double logGammaSum,
-	double* logpik, double* mu, double* sigma
 );
 
 #endif

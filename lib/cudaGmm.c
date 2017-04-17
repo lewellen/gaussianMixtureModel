@@ -22,83 +22,44 @@ struct GMM* cudaFit(
 	
 	struct GMM* gmm = initGMM(X, numPoints, pointDim, numComponents);
 
-	const double tolerance = 1e-8;
-	size_t maxIterations = 100;
-	double prevLogL = -INFINITY;
-	double currentLogL = -INFINITY;
-
-	double* logpi = (double*)checkedCalloc(numComponents, sizeof(double));
-	double* loggamma = (double*)checkedCalloc(numPoints * numComponents, sizeof(double));
-	double* logGamma = (double*)checkedCalloc(numComponents, sizeof(double));
-
-	double* xm = (double*)checkedCalloc(pointDim, sizeof(double));
-	double* outerProduct = (double*)checkedCalloc(pointDim * pointDim, sizeof(double));
+	double* pi = (double*) malloc(numComponents * sizeof(double));
+	double* Mu = (double*) malloc(numComponents * pointDim * sizeof(double));
+	double* Sigma = (double*) malloc(numComponents * pointDim * pointDim * sizeof(double));	
+	double* SigmaL = (double*) malloc(numComponents * pointDim * pointDim * sizeof(double));
+	double* normalizers = (double*) malloc(numComponents * sizeof(double));
 
 	for(size_t k = 0; k < numComponents; ++k) {
-		const double pik = gmm->components[k].pi;
-		assert(pik >= 0);
-		logpi[k] = log(pik);
+		struct Component* c = & gmm->components[k];
+
+		pi[k] = c->pi;
+		memcpy(&Mu[k * pointDim], c->mu, pointDim * sizeof(double));
+		memcpy(&Sigma[k * pointDim * pointDim], c->sigma, pointDim * pointDim * sizeof(double));
+		memcpy(&SigmaL[k * pointDim * pointDim], c->sigmaL, pointDim * pointDim * sizeof(double));
+		normalizers[k] = c->normalizer;
 	}
 
-	double* Mu = (double*) checkedCalloc(pointDim * numComponents, sizeof(double));
-	double* SigmaL = (double*) checkedCalloc(pointDim * pointDim * numComponents, sizeof(double));
+	gpuGmmFit(
+		X,
+		numPoints, pointDim, numComponents,
+		pi, Mu, Sigma,
+		SigmaL, normalizers
+	);
 
-	do {
-		// --- E-Step ---
+	for(size_t k = 0; k < numComponents; ++k) {
+		struct Component* c = & gmm->components[k];
 
-		for(size_t k = 0; k < numComponents; ++k) {
-			struct Component* C = & gmm->components[k];
-			memcpy(&Mu[k * pointDim], C->mu, pointDim * sizeof(double));
-			memcpy(&SigmaL[k * pointDim * pointDim], C->sigmaL, pointDim * pointDim * sizeof(double));
-		}
+		c->pi = pi[k];
+		memcpy(c->mu, &Mu[k * pointDim], pointDim * sizeof(double));
+		memcpy(c->sigma, &Sigma[k * pointDim * pointDim], pointDim * pointDim * sizeof(double));
+		memcpy(c->sigmaL, &SigmaL[k * pointDim * pointDim], pointDim * pointDim * sizeof(double));
+		c->normalizer = normalizers[k];
+	}
 
-		prevLogL = currentLogL;
-		currentLogL = gpuPerformEStep(
-			numPoints, pointDim, numComponents,
-			X,
-			logpi, Mu, SigmaL,
-			loggamma
-		);
-
-		assert(maxIterations > 0);
-		--maxIterations;
-		if(!shouldContinue(maxIterations, prevLogL, currentLogL, tolerance)) {
-			break;
-		}
-
-		// Let Gamma[component] = \Sum_point gamma[component, point]
-		gpuCalcLogGammaK(
-			numPoints, numComponents,
-			loggamma, logGamma
-		);
-
-		// Not worth running on gpu since k should be smallish	
-		double logGammaSum = calcLogGammaSum(logpi, numComponents, logGamma);
-
-		// --- M-Step ---
-		for(size_t k = 0; k < numComponents; ++k) {
-			gpuPerformMStep(
-				numPoints, pointDim,
-				X, 
-				& loggamma[k * numPoints], logGamma[k], logGammaSum,
-				& logpi[k], gmm->components[k].mu, gmm->components[k].sigma
-			);
-
-			gmm->components[k].pi = exp(logpi[k]);
-
-			prepareCovariance(& gmm->components[k], pointDim);
-		}
-	} while (1 == 1);
-
-	free(Mu);
+	free(normalizers);
 	free(SigmaL);
-
-	free(logpi);
-	free(loggamma);
-	free(logGamma);
-
-	free(xm);
-	free(outerProduct);
+	free(Sigma);
+	free(Mu);
+	free(pi);
 
 	return gmm;
 }

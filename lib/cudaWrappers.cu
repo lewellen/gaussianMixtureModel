@@ -11,89 +11,6 @@
 #include "cudaGmm.hu"
 #include "cudaMVNormal.hu"
 
-struct GmmEmGpuCtx {
-	size_t numPoints;
-	size_t pointDim;
-	size_t numComponents;
-
-	double* X;
-	double* logpi;
-	double* mu;
-	double* sigmaL;
-	double* loggamma;
-
-	size_t M;
-	cudaDeviceProp* deviceProp;
-	double* device_X;
-	double* device_logpi;
-	double* device_mu;
-	double* device_sigmaL;
-	double* device_loggamma;
-};
-
-extern "C" struct GmmEmGpuCtx* gpuInitCtx(
-	size_t numPoints,
-	size_t pointDim,
-	size_t numComponents,
-	double* X,
-	double* logpi,
-	double* mu,
-	double* sigmaL,
-	double* loggamma
-) {
-	assert(numPoints > 0);
-	assert(pointDim > 0);
-	assert(numComponents > 0);
-
-	assert(X != NULL);
-	assert(logpi != NULL);
-	assert(mu != NULL);
-	assert(sigmaL != NULL);
-	assert(loggamma != NULL);
-
-	struct GmmEmGpuCtx* ctx = (struct GmmEmGpuCtx*) malloc(sizeof(struct GmmEmGpuCtx));
-
-	ctx->numPoints = numPoints;
-	ctx->pointDim = pointDim;
-	ctx->numComponents = numComponents;
-	
-	ctx->X = X;
-	ctx->logpi = logpi;
-	ctx->mu = mu;
-	ctx->sigmaL = sigmaL;
-	ctx->loggamma = loggamma;
-
-	int deviceId;
-	check(cudaGetDevice(&deviceId));
-
-	ctx->deviceProp = (cudaDeviceProp*) malloc(sizeof(cudaDeviceProp));
-	check(cudaGetDeviceProperties(ctx->deviceProp, deviceId));
-
-	ctx->M = largestPowTwoLessThanEq(numPoints);
-
-	check(ctx->device_X = sendToGpu(numPoints * pointDim, X));
-	check(ctx->device_logpi = sendToGpu(numComponents, logpi));
-	check(ctx->device_mu = sendToGpu(numComponents * pointDim, mu));
-	check(ctx->device_sigmaL = sendToGpu(numComponents * pointDim * pointDim, sigmaL));
-	check(ctx->device_loggamma = sendToGpu(numPoints * pointDim, loggamma));
-
-	return ctx;
-}
-
-extern "C" void gpuDestroyCtx(
-	struct GmmEmGpuCtx* ctx
-) {
-	assert(ctx != NULL);
-	cudaFree(ctx->device_X);
-	cudaFree(ctx->device_logpi);
-	cudaFree(ctx->device_mu);
-	cudaFree(ctx->device_sigmaL);
-	cudaFree(ctx->device_loggamma);
-
-	free(ctx->deviceProp);
-	free(ctx);
-}
-
 extern "C" void gpuSum(size_t numPoints, const size_t pointDim, double* host_a, double* host_sum) {
 	assert(numPoints > 0);
 	assert(pointDim > 0);
@@ -272,73 +189,223 @@ extern "C" void gpuCalcLogGammaK(
  		logGamma[k] = maxValue + log(sum );
 	}
 	free(working);
-
-extern "C" double gpuPerformEStep(
-	struct GmmEmGpuCtx* ctx
-) {
-	assert(ctx != NULL);
-
-	check(cudaMemcpy(ctx->device_mu, ctx->mu, ctx->numComponents * ctx->pointDim * sizeof(double), cudaMemcpyHostToDevice));
-	check(cudaMemcpy(ctx->device_mu, ctx->sigma, ctx->numComponents * ctx->pointDim * ctx->pointDim * sizeof(double), cudaMemcpyHostToDevice));
-
-	dim3 grid, block;
-	calcDim(ctx->numPoints, ctx->deviceProp, &block, &grid);
-	for(size_t k = 0; k < ctx->numComponents; ++k) {
-		kernLogMVNormDist<<<grid, block>>>(
-			ctx->numPoints, ctx->pointDim,
-			ctx->device_X, 
-			& ctx->device_mu[k * ctx->pointDim], 
-			& ctx->device_sigmaL[k * ctx->pointDim * ctx->pointDim],
-			& ctx->device_loggamma[k * ctx->numPoints]
-		);
-	}
-
-	double logL = cudaGmmLogLikelihoodAndGammaNK(
-		ctx->deviceProp,
-		ctx->numPoints, ctx->numComponents,
-		ctx->M,
-		ctx->logpi, ctx->loggamma,
-		ctx->device_logpi, ctx->device_loggamma
-	);
-
-	// decide if necessary to keep
-	check(cudaMemcpy(logP, device_logP, 
-		numPoints * numComponents * sizeof(double), cudaMemcpyDeviceToHost));
-
-	return logL;
 }
 
-extern "C" void gpuPerformMStep(
-	struct GmmEmGpuCtx* ctx
-) {
-	for(size_t k = 0; k < numComponents; ++k) {
-		// update pi_+1
-		*logpi[k] += logGamma[k] - logGammaSum;
+__global__ void kernExp(double* A) {
+	int b = blockIdx.y * gridDim.x + blockIdx.x;
+	int i = b * blockDim.x + threadIdx.x;
+	A[i] = exp(A[i]);
+}
 
-		// calculate mu_+1
-		cudaUpdateMu(
-			ctx->deviceProp,
-			ctx->numPoints, ctx->pointDim,
-			ctx->M,
-			ctx->X, & ctx->loggamma[k * numPoints], ctx->logGamma[k],
-			ctx->device_X, & ctx->device_loggamma[k * numPoints],
-			& ctx->mu[k * pointDim]
+extern "C" void gpuGmmFit(
+	const double* X,
+	const size_t numPoints, 
+	const size_t pointDim, 
+	const size_t numComponents,
+	double* pi,
+	double* Mu,
+	double* Sigma,
+	double* SigmaL,
+	double* normalizers
+) {
+	assert(X != NULL);
+	assert(numPoints > 0);
+	assert(pointDim > 0 && pointDim <= 1024);
+	assert(numComponents > 0 && numComponents <= 1024);
+
+	assert(pi != NULL);
+	assert(Mu != NULL);
+	assert(Sigma != NULL);
+	assert(SigmaL != NULL);
+	assert(normalizers != NULL);
+
+	int deviceId;
+
+	check(cudaGetDevice(&deviceId));
+
+	cudaDeviceProp deviceProp;
+	check(cudaGetDeviceProperties(&deviceProp, deviceId));
+
+	double* device_X = sendToGpu(numPoints * pointDim, X);
+
+	for(size_t i = 0; i < numComponents; ++i) {
+		assert(pi[i] > 0);
+		pi[i] = log(pi[i]);
+	}
+
+	double* device_logpi = sendToGpu(numComponents, pi);
+	double* device_Mu = sendToGpu(numComponents * pointDim, Mu);
+	double* device_Sigma = sendToGpu(numComponents * pointDim * pointDim, Sigma);
+
+	double* device_SigmaL = sendToGpu(numComponents * pointDim * pointDim, SigmaL);
+	double* device_normalizers = sendToGpu(numComponents, normalizers);
+
+
+	double* device_loggamma = mallocOnGpu(numPoints * numComponents);
+	double* device_logGamma = mallocOnGpu(numPoints * numComponents);	
+
+	double currentLogL = -INFINITY, previousLogL = -INFINITY;
+
+	// logPx, mu, sigma reductions
+	// This means for mu and sigma can only do one component at a time otherwise 
+	// the memory foot print will limit how much data we can actually work with.
+	double* device_working = mallocOnGpu(numPoints * pointDim * pointDim * numComponents);
+
+	dim3 grid, block;
+	calcDim(numPoints, &deviceProp, &block, &grid);
+
+	size_t iteration = 0;
+	const size_t maxIterations = 100;
+	const double tolerance = 1e-8;
+
+	do {
+		// --------------------------------------------------------------------------
+		// E-Step
+		// --------------------------------------------------------------------------
+
+		// loggamma[k * numPoints + i] = p(x_i | mu_k, Sigma_k )
+		for(size_t k = 0; k < numComponents; ++k) {
+			// Fill in numPoint many probabilities
+			kernLogMVNormDist<<<grid, block>>>(
+				numPoints, pointDim,
+				device_X, 
+				& device_Mu[k * pointDim], 
+				& device_SigmaL[k * pointDim * pointDim],
+				& device_loggamma[k * numPoints]
+			);
+		}
+
+		// Need all of the above log prob (x_i | ...) value before we can continue
+		cudaDeviceSynchronize();
+
+		// loggamma[k * numPoints + i] = p(x_i | mu_k, Sigma_k) / p(x_i)
+		// working[i] = p(x_i)
+		kernCalcLogLikelihoodAndGammaNK<<<grid, block>>>(
+			numPoints, numPoints, numComponents,
+			device_logpi, device_working, device_loggamma
 		);
+
+		// working[0] = sum_{i} p(x_i)
+		cudaArraySum(&deviceProp, numPoints, 1, device_working);
+
+		previousLogL = currentLogL;		
+		check(cudaMemcpy(
+			&currentLogL, device_working, 
+			sizeof(double), 
+			cudaMemcpyDeviceToHost
+		));
+
+		if(fabs(currentLogL - previousLogL) < tolerance || currentLogL < previousLogL) {
+			break;
+		}
+
+		// logGamma = loggamma
+		check(cudaMemcpy(
+			device_logGamma, device_loggamma, 
+			numPoints * numComponents * sizeof(double), 
+			cudaMemcpyDeviceToDevice
+		));
+
+		for(size_t k = 0; k < numComponents; ++k) {
+			kernExp<<<grid, block>>>(&device_logGamma[k * numPoints]);
+		}
 
 		cudaDeviceSynchronize();
 
-		// Calculate sigma_+1
-		cudaUpdateSigma(
-			ctx->deviceProp,
-			ctx->numPoints, ctx->pointDim,
-			ctx->M,
-			ctx->X, & ctx->loggamma[k * ctx->numPoints], logGamma[k],
-			ctx->device_X, & ctx->device_loggamma[k * ctx->numPoints],
-			ctx->mu[k * ctx->pointDim], 
-			ctx->sigma[k * ctx->pointDim * ctx->pointDim];
+		// logGamma[k * numPoints + 0] = sum_{i} loggamma[k * numPoints + i]
+		for(size_t k = 0; k < numComponents; ++k) {
+			cudaArraySum(&deviceProp, numPoints, 1, & device_logGamma[k * numPoints]);
+		}
+
+		// --------------------------------------------------------------------------
+		// M-Step
+		// --------------------------------------------------------------------------
+
+		for(size_t k = 0; k < numComponents; ++k) {
+			// working[i * pointDim + j] = gamma_ik / Gamma K * x_j
+			kernCalcMu<<<grid, block>>>(
+				numPoints, pointDim,
+				device_X, 
+				& device_loggamma[k * numPoints], 
+				& device_logGamma[k * numPoints],
+				device_working
+			);
+
+			// working[0 + j] = sum gamma_ik / Gamma K * x_j
+			cudaArraySum(&deviceProp, numPoints, pointDim, device_working);
+
+			check(cudaMemcpy(
+				& device_Mu[k * pointDim],
+				device_working,
+				pointDim * sizeof(double),
+				cudaMemcpyDeviceToDevice
+			));
+
+			// working[i * pointDim * pointDim + j] = 
+			// 	gamma_ik / Gamma_k [ (x_i - mu) (x_i - mu)^T ]_j
+			kernCalcSigma<<<grid, block>>>(
+				numPoints, pointDim,
+				device_X, 
+				& device_Mu[k * pointDim],
+				& device_loggamma[k * numPoints],
+				& device_logGamma[k * numPoints],
+				device_working
+			);
+
+			// working[0 + j] = sum gamma_ik / Gamma K * [...]_j
+			cudaArraySum(&deviceProp, numPoints, pointDim * pointDim, device_working);
+
+			check(cudaMemcpy(
+				& device_Sigma[k * pointDim * pointDim],
+				device_working,
+				pointDim * pointDim * sizeof(double),
+				cudaMemcpyDeviceToDevice
+			));
+		
+			cudaDeviceSynchronize();		
+		}
+		
+		// pi_k^(t+1) = pi_k Gamma_k / sum_{i}^{K} pi_i * Gamma_i
+		// Use thread sync to compute denom to avoid data race
+		kernUpdatePi<<<1, numComponents>>>(
+			numPoints, numComponents,
+			device_logpi, device_logGamma
 		);
 
-		// doing the cholesky decomposition is caller (cpu) side for now
+		// recompute sigmaL and normalizer
+		kernPrepareCovariances<<<1, numComponents>>>(
+			numComponents, pointDim,
+			device_Sigma, device_SigmaL,
+			device_normalizers
+		);	
+
+		cudaDeviceSynchronize();		
+	
+	} while(++iteration < maxIterations);
+
+	cudaFree(device_working);
+
+	cudaFree(device_logGamma);
+	cudaFree(device_loggamma);
+
+	check(cudaMemcpy(normalizers, device_normalizers, numComponents * sizeof(double), cudaMemcpyDeviceToHost));
+	cudaFree(device_normalizers);
+
+	check(cudaMemcpy(SigmaL, device_SigmaL, numComponents * pointDim * pointDim * sizeof(double), cudaMemcpyDeviceToHost));
+	cudaFree(device_SigmaL);
+
+	check(cudaMemcpy(Sigma, device_Sigma, numComponents * pointDim * pointDim * sizeof(double), cudaMemcpyDeviceToHost));
+	cudaFree(device_Sigma);
+
+	check(cudaMemcpy(Mu, device_Mu, numComponents * pointDim * sizeof(double), cudaMemcpyDeviceToHost));
+	cudaFree(device_Mu);
+
+	check(cudaMemcpy(pi, device_logpi, numComponents * sizeof(double), cudaMemcpyDeviceToHost));
+	cudaFree(device_logpi);
+
+	for(size_t i = 0; i < numComponents; ++i) {
+		pi[i] = exp(pi[i]);
 	}
 
+	cudaFree(device_X);
 }

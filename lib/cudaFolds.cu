@@ -34,12 +34,21 @@ __global__ void kernBlockWiseSum(const size_t numPoints, const size_t pointDim, 
 	}
 }
 
+
 __host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A) {
 	assert(deviceProp != NULL);
 	assert(numPoints > 0);
-	assertPowerOfTwo(numPoints);
 	assert(pointDim > 0);
 	assert(device_A != NULL);
+
+	size_t M = largestPowTwoLessThanEq(numPoints);
+	if(M != numPoints) {
+		dim3 block , grid;
+		calcDim(M, deviceProp, &block, &grid);
+		kernElementWiseSum<<<grid, block>>>(
+			numPoints - M, pointDim, device_A, device_A + M * pointDim
+		);
+	}
 
 	// Parallel sum by continually folding the array in half and adding the right 
 	// half to the left half until the fold size is 1024 (single block), then let

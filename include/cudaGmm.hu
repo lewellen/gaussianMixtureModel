@@ -20,7 +20,7 @@ __host__ double cudaGmmLogLikelihoodAndGammaNK(
 
 __global__ void kernCalcMu(
 	const size_t numPoints, const size_t pointDim,
-	const double* X, const double* loggamma, const double logGammaK,
+	const double* X, const double* loggamma, const double* logGammaK,
 	double* dest
 );
 
@@ -37,7 +37,7 @@ __host__ void cudaUpdateMu(
 
 __global__ void kernCalcSigma(
 	const size_t numPoints, const size_t pointDim,
-	const double* X, const double* mu, const double* loggamma, const double logGammaK,
+	const double* X, const double* mu, const double* loggamma, const double* logGammaK,
 	double* dest
 );
 	
@@ -49,6 +49,17 @@ __host__ void cudaUpdateSigma(
 	const double* device_X, const double* device_loggamma,
 	double* mu, 
 	double* sigma
+);
+
+__global__ void kernPrepareCovariances(
+	const size_t numComponents, const size_t pointDim,
+	double* Sigma, double* SigmaL,
+	double* normalizers
+);
+
+__global__ void kernUpdatePi(
+	const size_t numPoints, const size_t numComponents,
+	double* logpi, double* logGamma
 );
 
 #endif

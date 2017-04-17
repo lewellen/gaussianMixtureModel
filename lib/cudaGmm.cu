@@ -1,4 +1,6 @@
 #include <assert.h>
+#include <float.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -113,7 +115,7 @@ __host__ double cudaGmmLogLikelihoodAndGammaNK(
 
 __global__ void kernCalcMu(
 	const size_t numPoints, const size_t pointDim,
-	const double* X, const double* loggamma, const double logGammaK,
+	const double* X, const double* loggamma, const double* GammaK,
 	double* dest
 ) {
 	// Assumes a 2D grid of 1024x1 1D blocks
@@ -123,7 +125,7 @@ __global__ void kernCalcMu(
 		return;
 	}
 
-	const double a = exp(loggamma[i]) / exp(logGammaK);
+	const double a = exp(loggamma[i]) / *GammaK;
 	const double* x = & X[i * pointDim];
 	double* y = & dest[i * pointDim]; 
 
@@ -140,7 +142,7 @@ __host__ void cudaUpdateMu(
 	const double* X, const double* loggamma, const double logGammaK,
 	const double* device_X, const double* device_loggamma,
 	double* mu
-) {
+) {/*
 	dim3 grid, block;
 	calcDim(M, deviceProp, &block, &grid);
 
@@ -175,11 +177,12 @@ __host__ void cudaUpdateMu(
 			mu[i] += cpuMuSum[i];
 		}
 	}
+*/
 }
 
 __global__ void kernCalcSigma(
 	const size_t numPoints, const size_t pointDim,
-	const double* X, const double* mu, const double* loggamma, const double logGammaK,
+	const double* X, const double* mu, const double* loggamma, const double* GammaK,
 	double* dest
 ) {
 	assert(pointDim < 1024);
@@ -193,7 +196,7 @@ __global__ void kernCalcSigma(
 
 	// gamma_{n,k} / Gamma_{k} (x - mu) (x - mu)^T
 
-	const double a = exp(loggamma[i]) / exp(logGammaK);
+	const double a = exp(loggamma[i]) / *GammaK;
 	const double* x = & X[i * pointDim];
 	double* y = & dest[i * pointDim * pointDim]; 
 
@@ -210,6 +213,93 @@ __global__ void kernCalcSigma(
 	}
 }
 
+__global__ void kernUpdatePi(
+	const size_t numPoints, const size_t numComponents,
+	double* logpi, double* Gamma
+) {
+	int b = blockIdx.y * gridDim.x + blockIdx.x;
+	int comp = b * blockDim.x + threadIdx.x;
+	if(comp > numComponents) {
+		return;
+	}
+
+	__shared__ double A[1024];
+	A[comp] = logpi[comp] + log(Gamma[comp * numPoints]);
+	__syncthreads();
+
+	double sum = 0;
+	for(size_t k = 0; k < numComponents; ++k) {
+		sum += exp(A[k]);
+	}
+
+	logpi[comp] = A[comp] - log(sum);
+}
+
+__global__ void kernPrepareCovariances(
+	const size_t numComponents, const size_t pointDim,
+	double* Sigma, double* SigmaL,
+	double* normalizers
+) {
+	// Parallel in the number of components
+
+	// Sigma: numComponents x pointDim * pointDim
+	// SigmaL: numComponents x pointDim * pointDim
+	// normalizers: 1 x numComponents
+
+	// Assumes a 2D grid of 1024x1 1D blocks
+	int b = blockIdx.y * gridDim.x + blockIdx.x;
+	int comp = b * blockDim.x + threadIdx.x;
+	if(comp > numComponents) {
+		return;
+	}
+
+	// L is the resulting lower diagonal portion of A = LL^T
+	const size_t ALen = pointDim * pointDim;
+	double* A = & Sigma[comp * ALen];
+	double* L = & SigmaL[comp * ALen];
+	for(size_t i = 0; i < ALen; ++i) { 
+		L[i] = 0;
+	}
+
+	for (size_t k = 0; k < pointDim; ++k) {
+		double sum = 0;
+		for (int s = 0; s < k; ++s) {
+			const double l = L[k * pointDim + s];
+			const double ll = l * l;
+			sum += ll;
+		}
+
+		assert(sum >= 0);
+
+		sum = A[k * pointDim + k] - sum;
+		if (sum <= DBL_EPSILON) {
+			printf("A must be positive definite. (sum = %E)\n", sum);
+			assert(sum > 0);
+			break;
+		}
+
+		L[k * pointDim + k] = sqrt(sum);
+		for (int i = k + 1; i < pointDim; ++i) {
+			double subsum = 0;
+			for (int s = 0; s < k; ++s)
+				subsum += L[i * pointDim + s] * L[k * pointDim + s];
+
+			L[i * pointDim + k] = (A[i * pointDim + k] - subsum) / L[k * pointDim + k];
+		}
+	}
+
+	double logDet = 1.0;
+	for (size_t i = 0; i < pointDim; ++i) {
+		double diag = L[i * pointDim + i];
+		assert(diag > 0);
+		logDet += log(diag);
+	}
+
+	logDet *= 2.0;
+
+	normalizers[comp] = - 0.5 * (pointDim * log(2.0 * M_PI) + logDet);
+}
+
 __host__ void cudaUpdateSigma(
 	cudaDeviceProp* deviceProp,
 	const size_t numPoints, const size_t pointDim,
@@ -218,7 +308,7 @@ __host__ void cudaUpdateSigma(
 	const double* device_X, const double* device_loggamma,
 	double* mu, 
 	double* sigma
-) {
+) {/*
 	dim3 grid, block;
 	calcDim(M, deviceProp, &block, &grid);
 
@@ -262,5 +352,5 @@ __host__ void cudaUpdateSigma(
 		for(size_t i = 0; i < pointDim * pointDim; ++i) {
 			sigma[i] += cpuSigmaSum[i];
 		}
-	}
+	}*/
 }

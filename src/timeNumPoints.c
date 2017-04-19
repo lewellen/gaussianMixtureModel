@@ -6,6 +6,7 @@
 #include "seqGmm.h"
 #include "parallelGmm.h"
 #include "util.h"
+#include "cudaGmm.h"
 
 int main(int argc, char** argv) {
 	srand(time(NULL));
@@ -35,8 +36,13 @@ int main(int argc, char** argv) {
 			gettimeofday(&end, NULL);
 			double parallelElapsedSec = calcElapsedSec(&start, &end);
 
-			fprintf(stdout, "%zu %zu %zu %f %f\n", 
-				numPoints, numComponents, pointDim, seqElapsedSec, parallelElapsedSec);
+			gettimeofday(&start, NULL);
+			freeGMM(cudaFit(X, numPoints, pointDim, numComponents));
+			gettimeofday(&end, NULL);
+			double gpuElapsedSec = calcElapsedSec(&start, &end);
+
+			fprintf(stdout, "%zu %zu %zu %.7f %.7f %.7f\n", 
+				numPoints, numComponents, pointDim, seqElapsedSec, parallelElapsedSec, gpuElapsedSec);
 
 			free(X);
 		}

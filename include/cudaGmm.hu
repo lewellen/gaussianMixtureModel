@@ -16,7 +16,17 @@ __host__ double cudaGmmLogLikelihoodAndGammaNK(
 	const double* device_logpi, double* device_logP
 );
 
+__global__ void kernExp(double* A, double* bias);
 
+__global__ void kernBiasAndLog(double* sumexp, double* bias); 
+
+__host__ void cudaLogSumExp(
+	cudaDeviceProp* deviceProp, dim3 grid, dim3 block, 
+	const size_t numPoints,
+	double* device_src, double* device_dest, 
+	double* device_working, 
+	cudaStream_t stream
+);
 
 __global__ void kernCalcMu(
 	const size_t numPoints, const size_t pointDim,
@@ -24,31 +34,10 @@ __global__ void kernCalcMu(
 	double* dest
 );
 
-__host__ void cudaUpdateMu(
-	cudaDeviceProp* deviceProp,
-	const size_t numPoints, const size_t pointDim,
-	const size_t M,
-	const double* X, const double* loggamma, const double logGammaK,
-	const double* device_X, const double* device_loggamma,
-	double* mu
-);
-
-
-
 __global__ void kernCalcSigma(
 	const size_t numPoints, const size_t pointDim,
 	const double* X, const double* mu, const double* loggamma, const double* logGammaK,
 	double* dest
-);
-	
-__host__ void cudaUpdateSigma(
-	cudaDeviceProp* deviceProp,
-	const size_t numPoints, const size_t pointDim,
-	const size_t M,
-	const double* X, const double* loggamma, const double logGammaK,
-	const double* device_X, const double* device_loggamma,
-	double* mu, 
-	double* sigma
 );
 
 __global__ void kernPrepareCovariances(

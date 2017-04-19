@@ -38,7 +38,6 @@ void logLikelihood(
 );
 
 int shouldContinue(
-	const size_t maxIterations, 
 	const double prevLogL, const double currentLogL,
 	const double tolerance
 );

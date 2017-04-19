@@ -15,17 +15,14 @@ __global__ void kernBlockWiseSum(const size_t numPoints, const size_t pointDim, 
 
 __host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A, cudaStream_t stream = 0);
 
-__host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A, double* host_sum);
-
-
 /*
  * Methods to support scalar array maximum.
  *
  */
-__global__ void kernElementWiseMax(int N, double* dest, double* src);
+__global__ void kernElementWiseMax(const size_t numPoints, double* dest, double* src);
 
-__global__ void kernBlockWiseMax(double* dest);
+__global__ void kernBlockWiseMax(const size_t numPoints, double* dest);
 
-__host__ double cudaArrayMax(cudaDeviceProp* deviceProp, const size_t N, double* device_A);
+__host__ void cudaArrayMax(cudaDeviceProp* deviceProp, size_t numPoints, double* device_A, cudaStream_t stream = 0);
 
 #endif

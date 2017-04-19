@@ -40,8 +40,10 @@ extern "C" void gpuSum(size_t numPoints, const size_t pointDim, double* host_a, 
 
 	// cudaArraySum is synchronous
 	cudaArraySum(
-		&deviceProp, numPoints, pointDim, device_a, host_sum
+		&deviceProp, numPoints, pointDim, device_a
 		);
+
+	check(cudaMemcpy(host_sum, device_a, pointDim * sizeof(double), cudaMemcpyDeviceToHost));
 
 	cudaFree(device_a);
 
@@ -60,30 +62,16 @@ extern "C" double gpuMax(size_t N, double* host_a) {
 	cudaDeviceProp deviceProp;
 	check(cudaGetDeviceProperties(&deviceProp, deviceId));
 
-	double cpuMax = -INFINITY;
-	if(N > 1024) {
-		// cudaArrayMax is meant for powers of two when N > 1024; 
-		size_t M = largestPowTwoLessThanEq(N);
-		for(size_t i = M; i < N; ++i) {
-			if(host_a[i] > cpuMax) {
-				cpuMax = host_a[i];
-			}
-		}
-		N = M;
-	}
-
 	double *device_a = sendToGpu(N, host_a);
 
-	// cudaArrayMax is synchronous
-	double gpuMax = cudaArrayMax(
+	cudaArrayMax(
 		&deviceProp, N, device_a
 		);
 
-	cudaFree(device_a);
+	double gpuMax = 0;
+	check(cudaMemcpy(&gpuMax, device_a, sizeof(double), cudaMemcpyDeviceToHost));
 
-	if(cpuMax > gpuMax) {
-		return cpuMax;
-	}
+	cudaFree(device_a);
 
 	return gpuMax;
 }
@@ -191,11 +179,6 @@ extern "C" void gpuCalcLogGammaK(
 	free(working);
 }
 
-__global__ void kernExp(double* A) {
-	int b = blockIdx.y * gridDim.x + blockIdx.x;
-	int i = b * blockDim.x + threadIdx.x;
-	A[i] = exp(A[i]);
-}
 
 extern "C" void gpuGmmFit(
 	const double* X,
@@ -226,9 +209,9 @@ extern "C" void gpuGmmFit(
 	cudaDeviceProp deviceProp;
 	check(cudaGetDeviceProperties(&deviceProp, deviceId));
 
-	printf("name: %s\n", deviceProp.name);
-	printf("multiProcessorCount: %d\n", deviceProp.multiProcessorCount);
-	printf("concurrentKernels: %d\n", deviceProp.concurrentKernels);
+	// printf("name: %s\n", deviceProp.name);
+	// printf("multiProcessorCount: %d\n", deviceProp.multiProcessorCount);
+	// printf("concurrentKernels: %d\n", deviceProp.concurrentKernels);
 
 	double* device_X = sendToGpu(numPoints * pointDim, X);
 
@@ -327,22 +310,13 @@ extern "C" void gpuGmmFit(
 		// --------------------------------------------------------------------------
 
 		for(size_t k = 0; k < numComponents; ++k) {
-			// logGamma = loggamma
-			check(cudaMemcpyAsync(
-				& device_logGamma[k * numPoints], & device_loggamma [k * numPoints], 
-				numPoints * sizeof(double), 
-				cudaMemcpyDeviceToDevice,
+			cudaLogSumExp(
+				& deviceProp, grid, block, 
+				numPoints,
+				& device_loggamma[k * numPoints], & device_logGamma[k * numPoints], 
+				& device_working[k * numPoints], 
 				streams[k]
-			));
-		}
-
-		for(size_t k = 0; k < numComponents; ++k) {
-			kernExp<<<grid, block, 0, streams[k]>>>(&device_logGamma[k * numPoints]);
-		}
-
-		for(size_t k = 0; k < numComponents; ++k) {
-			// logGamma[k * numPoints + 0] = sum_{i} loggamma[k * numPoints + i]
-			cudaArraySum(&deviceProp, numPoints, 1, & device_logGamma[k * numPoints], streams[k]);
+			);
 		}
 
 		for(size_t k = 0; k < numComponents; ++k) {

@@ -131,14 +131,9 @@ void logLikelihood(
 }
 
 int shouldContinue(
-	const size_t maxIterations, 
 	const double prevLogL, const double currentLogL,
 	const double tolerance
 ) {
-	if(maxIterations == 0) {
-		return 0;
-	}
-
 	// In principle this shouldn't happen, but if it does going to assume we're in
 	// an odd state and that we should terminate.
 	if(currentLogL < prevLogL) {

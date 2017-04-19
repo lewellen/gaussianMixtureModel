@@ -20,6 +20,7 @@ struct GMM* fit(
 	struct GMM* gmm = initGMM(X, numPoints, pointDim, numComponents);
 
 	const double tolerance = 1e-8;
+	size_t iteration = 0;
 	size_t maxIterations = 100;
 	double prevLogL = -INFINITY;
 	double currentLogL = -INFINITY;
@@ -66,7 +67,7 @@ struct GMM* fit(
 
 		assert(maxIterations > 0);
 		--maxIterations;
-		if(!shouldContinue(maxIterations, prevLogL, currentLogL, tolerance)) {
+		if(!shouldContinue(prevLogL, currentLogL, tolerance)) {
 			break;
 		}
 
@@ -88,7 +89,7 @@ struct GMM* fit(
 			outerProduct, xm
 		);
 
-	} while (1 == 1);
+	} while (++iteration < maxIterations);
 
 	free(logpi);
 	free(loggamma);

@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
 
 	struct timeval start, end;
 
-	fprintf(stdout, "#numPoints numComponents pointDim seqElapsedSec parallelElapsedSec\n");
+	fprintf(stdout, "#numPoints numComponents pointDim seqElapsedSec parallelElapsedSec cudaElapsedSec\n");
 	for(size_t sample = 0; sample < numSamples; ++sample) {	
 		for(size_t pointDim = minPointDim; pointDim < maxPointDim; pointDim *= 2) {
 			double* X = generateGmmData(numPoints, pointDim, numComponents);

@@ -14,14 +14,14 @@ int main(int argc, char** argv) {
 	const size_t minNumComponents = 1;
 	const size_t maxNumComponents = 256;
 
-	const size_t numPoints = 4096;
+	const size_t numPoints = 512 * 1024;
 	const size_t pointDim = 2;
 
 	const size_t numSamples = 1;
 
 	struct timeval start, end;
 
-	fprintf(stdout, "#numPoints numComponents pointDim seqElapsedSec parallelElapsedSec\n");
+	fprintf(stdout, "#numPoints numComponents pointDim seqElapsedSec parallelElapsedSec cudaElapsedSec\n");
 	for(size_t sample = 0; sample < numSamples; ++sample) {	
 		for(size_t numComponents = minNumComponents; numComponents < maxNumComponents; numComponents *= 2) {
 			double* X = generateGmmData(numPoints, pointDim, numComponents);

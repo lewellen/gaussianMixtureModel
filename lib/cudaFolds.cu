@@ -5,6 +5,10 @@
 #include "cudaCommon.hu"
 #include "cudaFolds.hu"
 
+// ----------------------------------------------------------------------------
+// Find sum of a vector array
+// ----------------------------------------------------------------------------
+
 __device__ void devVecAdd(size_t pointDim, double* dest, double* src) {
 	for(size_t i = 0; i < pointDim; ++i) {
 		dest[i] += src[i];
@@ -12,6 +16,8 @@ __device__ void devVecAdd(size_t pointDim, double* dest, double* src) {
 }
 
 __global__ void kernElementWiseSum(const size_t numPoints, const size_t pointDim, double* dest, double* src) {
+	// Called to standardize arrays to be a power of two
+
 	// Assumes a 2D grid of 1D blocks
 	int b = blockIdx.y * gridDim.x + blockIdx.x;
 	int i = b * blockDim.x + threadIdx.x;
@@ -25,11 +31,6 @@ __global__ void kernBlockWiseSum(const size_t numPoints, const size_t pointDim, 
 	// Assumes a 2D grid of 1024x1 1D blocks
 	int b = blockIdx.y * gridDim.x + blockIdx.x;
 	int i = b * blockDim.x + threadIdx.x;
-	/*
-	for(int s = blockDim.x / 2; threadIdx.x < s; s /= 2) {
-	       devVecAdd(pointDim, &dest[i * pointDim], &dest[(i + s) * pointDim]);
-		__syncthreads();
-	} */
 
 	// call repeatedly for each dimension where dest is assumed to begin at dimension d
 
@@ -106,66 +107,40 @@ __host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const s
 
 		numPoints /= block.x;
 	}
-
-	/*
-	// Parallel sum by continually folding the array in half and adding the right 
-	// half to the left half until the fold size is 1024 (single block), then let
-	// GPU reduce the remaining block to a single value and copy it over. O(log n).
-	if(numPoints > 1024) {
-		dim3 block, grid;
-		for(numPoints /= 2; numPoints >= 1024; numPoints /= 2) {
-			calcDim(numPoints, deviceProp, &block, &grid);
-			kernElementWiseSum<<<grid, block, 0, stream>>>(
-				numPoints, pointDim, device_A, device_A + numPoints * pointDim
-			);
-		}
-		numPoints *= 2;
-	}
-
-	assert(numPoints <= 1024);
-
-	for(size_t d = 0; d < pointDim; ++d) {
-		kernBlockWiseSum<<<1, numPoints, 0, stream>>>(
-			numPoints, pointDim, device_A + d
-		);
-	}
-	*/
 }
 
-__host__ void cudaArraySum(cudaDeviceProp* deviceProp, size_t numPoints, const size_t pointDim, double* device_A, double* host_sum) {
-	assert(host_sum != NULL);
-	check((void)0);
-	cudaArraySum(deviceProp, numPoints, pointDim, device_A);
-	check((void)0);
-	check(cudaMemcpy(host_sum, device_A, pointDim * sizeof(double), cudaMemcpyDeviceToHost));
-}
+// ----------------------------------------------------------------------------
+// Find maximum of a scalar array
+// ----------------------------------------------------------------------------
 
-__global__ void kernElementWiseMax(int N, double* dest, double* src) {
+__global__ void kernElementWiseMax(const size_t numPoints, double* dest, double* src) {
+	// Called to standardize arrays to be a power of two
+
 	// Assumes a 2D grid of 1D blocks
 	int b = blockIdx.y * gridDim.x + blockIdx.x;
 	int i = b * blockDim.x + threadIdx.x;
-	if(i < N) {
+
+	if(i < numPoints) {
 		if(dest[i] < src[i]) {
 			dest[i] = src[i];
 		}
 	}
 }
 
-__global__ void kernBlockWiseMax(const size_t N, double* dest) {
+__global__ void kernBlockWiseMax(const size_t numPoints, double* dest) {
 	// Assumes a 2D grid of 1024x1 1D blocks
 	int b = blockIdx.y * gridDim.x + blockIdx.x;
 	int i = b * blockDim.x + threadIdx.x;
 
-	// Load into block shared memory
 	__shared__ double blockMax[1024];
 
-	if(threadIdx.x >= N) {
+	if(threadIdx.x >= numPoints) {
 		blockMax[threadIdx.x] = -INFINITY;
 	} else {
 		blockMax[threadIdx.x] = dest[i];
 	}
 
-	__syncthreads();	
+	__syncthreads();
 
 	// Do all the calculations in block shared memory instead of global memory.
 	for(int s = blockDim.x / 2; threadIdx.x < s; s /= 2) {
@@ -176,30 +151,39 @@ __global__ void kernBlockWiseMax(const size_t N, double* dest) {
 	}
 
 	if(threadIdx.x == 0) {
-		// Just do one global write instead of 2048.
+		// Just do one global write
 		dest[i] = blockMax[0];
 	}
 }
 
-__host__ double cudaArrayMax(cudaDeviceProp* deviceProp, const size_t N, double* device_A) {
-	// Parallel max by continually folding the array in half and maxing the right 
-	// half to the left half until the fold size is 1024 (single block), then let
-	// GPU reduce the remaining block to a single value and copy it over. O(log n).
-	if(N > 1024) {
-		assertPowerOfTwo(N);
-		dim3 block, grid;
-		for(size_t n = N/2; n >= 1024; n /= 2) {
-			calcDim(n, deviceProp, &block, &grid);
-			kernElementWiseMax<<<grid, block>>>(n, device_A, device_A + n);
-			check((void)0);
-		}
-	}
- 
-	kernBlockWiseMax<<<1, 1024>>>(N, device_A);
-	check((void)0);
+__host__ void cudaArrayMax(cudaDeviceProp* deviceProp, size_t numPoints, double* device_A, cudaStream_t stream) {
+	assert(deviceProp != NULL);
+	assert(numPoints > 0);
+	assert(device_A != NULL);
 
-	double maxValue = 0;
-	check(cudaMemcpy(&maxValue, device_A, sizeof(double), cudaMemcpyDeviceToHost));
-	check(cudaDeviceSynchronize());
-	return maxValue;
+	size_t M = largestPowTwoLessThanEq(numPoints);
+	if(M != numPoints) {
+		dim3 block , grid;
+		calcDim(M, deviceProp, &block, &grid);
+		kernElementWiseMax<<<grid, block, 0, stream>>>(
+			numPoints - M, device_A, device_A + M
+		);
+		numPoints = M;
+	}
+
+	while(numPoints > 1) {
+		dim3 block, grid;
+		calcDim(numPoints, deviceProp, &block, &grid);
+
+		kernBlockWiseMax<<<grid, block, 0, stream>>>(numPoints, device_A);
+		
+		if(numPoints > block.x) {
+			dim3 block2, grid2;
+			calcDim(grid.x, deviceProp, &block2, &grid2);
+			kernMoveMem<<<grid2, block2, 0, stream>>>(numPoints, 1, block.x, device_A);
+		}
+
+		numPoints /= block.x;
+	}
 }
+

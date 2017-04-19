@@ -19,10 +19,7 @@ void checkStopCriteria(void* untypedArgs) {
 		sargs->currentLogL += sargs->logLK[i];
 	}
 
-	assert(sargs->maxIterations > 0);
-	--sargs->maxIterations;
 	sargs->shouldContinue = shouldContinue(
-		sargs->maxIterations,
 		sargs->prevLogL, sargs->currentLogL,
 		sargs->tolerance
 	);
@@ -58,6 +55,8 @@ void* parallelFitStart(void* untypedArgs) {
 	double* xm = (double*)checkedCalloc(pointDim, sizeof(double));
 	double* outerProduct = (double*)checkedCalloc(pointDim * pointDim, sizeof(double));
 
+	size_t iteration = 0;
+
 	do {
 		// --- E-Step ---
 
@@ -85,17 +84,6 @@ void* parallelFitStart(void* untypedArgs) {
 			break;
 		}
 
-		/*
-		// Parallelism here is ugly since it's spread across points instead of 
-		// components like everything else. Ugly cache behavior on 
-		// gamm_{n, k} /= sum.
-		calcLogGammaNK(
-			logpi, numComponents, 
-			args->pointStart, args->pointEnd, 
-			loggamma, numPoints
-		);
-		*/
-
 		arriveAt(sargs->barrier, NULL, NULL);
 
 		// Afterwards, everybody does
@@ -116,7 +104,7 @@ void* parallelFitStart(void* untypedArgs) {
 			outerProduct, xm
 		);
 
-	} while (1 == 1);
+	} while (++iteration < sargs->maxIterations);
 
 	free(xm);
 	free(outerProduct);

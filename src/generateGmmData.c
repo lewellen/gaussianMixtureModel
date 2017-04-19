@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
 
 	for(size_t i = 0; i < numPoints; ++i) {
 		for(size_t j = 0; j < pointDim; ++j) {
-			fprintf(stdout, "%f ", X[i * pointDim + j]);
+			fprintf(stdout, "%f\t", X[i * pointDim + j]);
 		}
 		fprintf(stdout, "\n");
 	}

@@ -267,6 +267,11 @@ extern "C" void gpuGmmFit(
 		cudaStreamCreate(&streams[k]);
 	}
 
+	cudaEvent_t kernelEvent[numComponents];
+	for(size_t k = 0; k < numComponents; ++k) {
+		cudaEventCreateWithFlags(& kernelEvent[k], cudaEventDisableTiming);
+	}
+
 	do {
 		// --------------------------------------------------------------------------
 		// E-Step
@@ -282,24 +287,36 @@ extern "C" void gpuGmmFit(
 				& device_SigmaL[k * pointDim * pointDim],
 				& device_loggamma[k * numPoints]
 			);
+
+			cudaEventRecord(kernelEvent[k], streams[k]);
+			cudaStreamWaitEvent(streams[numComponents-1], kernelEvent[k], 0);
 		}
+
 
 		// loggamma[k * numPoints + i] = p(x_i | mu_k, Sigma_k) / p(x_i)
 		// working[i] = p(x_i)
-		kernCalcLogLikelihoodAndGammaNK<<<grid, block>>>(
+		kernCalcLogLikelihoodAndGammaNK<<<grid, block, 0, streams[numComponents - 1]>>>(
 			numPoints, numPoints, numComponents,
 			device_logpi, device_working, device_loggamma
 		);
 
 		// working[0] = sum_{i} p(x_i)
-		cudaArraySum(&deviceProp, numPoints, 1, device_working);
+		cudaArraySum(&deviceProp, numPoints, 1, device_working, streams[numComponents - 1]);
 
 		previousLogL = currentLogL;
-		check(cudaMemcpy(
+		check(cudaMemcpyAsync(
 			&currentLogL, device_working, 
 			sizeof(double), 
-			cudaMemcpyDeviceToHost
+			cudaMemcpyDeviceToHost,
+			streams[numComponents - 1]
 		));
+
+		cudaEventRecord(kernelEvent[numComponents - 1], streams[numComponents - 1]);
+		cudaEventSynchronize(kernelEvent[numComponents - 1]);
+
+		for(size_t k = 0; k < numComponents; ++k) {
+			cudaStreamSynchronize(streams[k]);
+		}
 
 		if(fabs(currentLogL - previousLogL) < tolerance || currentLogL < previousLogL) {
 			break;
@@ -321,9 +338,14 @@ extern "C" void gpuGmmFit(
 
 		for(size_t k = 0; k < numComponents; ++k) {
 			kernExp<<<grid, block, 0, streams[k]>>>(&device_logGamma[k * numPoints]);
+		}
+
+		for(size_t k = 0; k < numComponents; ++k) {
 			// logGamma[k * numPoints + 0] = sum_{i} loggamma[k * numPoints + i]
 			cudaArraySum(&deviceProp, numPoints, 1, & device_logGamma[k * numPoints], streams[k]);
+		}
 
+		for(size_t k = 0; k < numComponents; ++k) {
 			// working[i * pointDim + j] = gamma_ik / Gamma K * x_j
 			kernCalcMu<<<grid, block, 0, streams[k]>>>(
 				numPoints, pointDim,
@@ -332,6 +354,9 @@ extern "C" void gpuGmmFit(
 				& device_logGamma[k * numPoints],
 				& device_working[k * numPoints * pointDim]
 			);
+		}
+
+		for(size_t k = 0; k < numComponents; ++k) {
 			// working[0 + j] = sum gamma_ik / Gamma K * x_j
 			cudaArraySum(&deviceProp, numPoints, pointDim, & device_working[k * numPoints * pointDim], streams[k]);
 		}
@@ -341,6 +366,16 @@ extern "C" void gpuGmmFit(
 				& device_Mu[k * pointDim],
 				& device_working[k * pointDim * numPoints],
 				pointDim * sizeof(double),
+				cudaMemcpyDeviceToDevice,
+				streams[k]
+			));
+		}
+
+		for(size_t k = 0; k < numComponents; ++k) {
+			check(cudaMemcpyAsync(
+				& device_Sigma[k * pointDim * pointDim],
+				& device_working[k * pointDim * pointDim * numPoints],
+				pointDim * pointDim * sizeof(double),
 				cudaMemcpyDeviceToDevice,
 				streams[k]
 			));
@@ -357,6 +392,9 @@ extern "C" void gpuGmmFit(
 				& device_logGamma[k * numPoints],
 				& device_working[k * pointDim * pointDim * numPoints]
 			);
+		}
+
+		for(size_t k = 0; k < numComponents; ++k) {
 			// working[0 + j] = sum gamma_ik / Gamma K * [...]_j
 			cudaArraySum(
 				&deviceProp, numPoints, pointDim * pointDim, 
@@ -372,27 +410,36 @@ extern "C" void gpuGmmFit(
 				cudaMemcpyDeviceToDevice,
 				streams[k]
 			));
-		}
 
-		for(size_t k = 0; k < numComponents; ++k) {
-			cudaStreamSynchronize(streams[k]);
-		}		
+			cudaEventRecord(kernelEvent[k], streams[k]);
+			cudaStreamWaitEvent(streams[numComponents-1], kernelEvent[k], 0);
+		}
 
 		// pi_k^(t+1) = pi_k Gamma_k / sum_{i}^{K} pi_i * Gamma_i
 		// Use thread sync to compute denom to avoid data race
-		kernUpdatePi<<<1, numComponents>>>(
+		kernUpdatePi<<<1, numComponents, 0, streams[numComponents - 1]>>>(
 			numPoints, numComponents,
 			device_logpi, device_logGamma
 		);
 
 		// recompute sigmaL and normalizer
-		kernPrepareCovariances<<<1, numComponents>>>(
+		kernPrepareCovariances<<<1, numComponents, 0, streams[numComponents - 1]>>>(
 			numComponents, pointDim,
 			device_Sigma, device_SigmaL,
 			device_normalizers
-		);	
-	
+		);
+
+		cudaEventRecord(kernelEvent[numComponents - 1], streams[numComponents - 1]);
+		cudaStreamWaitEvent(streams[numComponents - 1], kernelEvent[numComponents - 1], 0);
+
+		for(size_t k = 0; k < numComponents; ++k) {
+			cudaStreamSynchronize(streams[k]);
+		}
 	} while(++iteration < maxIterations);
+
+	for(size_t k = 0; k < numComponents; ++k) {
+		cudaEventDestroy(kernelEvent[k]);
+	}
 
 	for(size_t k = 0; k < numComponents; ++k) {
 		cudaStreamDestroy(streams[k]);

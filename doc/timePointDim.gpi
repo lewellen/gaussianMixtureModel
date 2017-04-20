@@ -1,0 +1,16 @@
+set xlabel 'Point dimension, $d$'
+set ylabel 'Elapsed time (sec)'
+
+set logscale xy
+set format xy '$10^{%L}$'
+
+set key top left
+
+set style fill solid 0.2
+
+set terminal epslatex color
+set output argOutput
+
+plot for [i=3:9:3] argInput using 1:i:i+1 with filledcu lc i + 1 notitle, for [i=2:8:3] argInput using 1:i with lines lw 3 lc i + 2 title columnheader(i) 
+
+set output

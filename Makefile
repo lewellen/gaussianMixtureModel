@@ -43,11 +43,8 @@ bin/document.pdf: doc/document.tex $(figs) | bin
 obj/%.tex: obj/%-summary.dat doc/%.gpi | obj
 	gnuplot -e "argInput='$<'; argOutput='$@'" $(word 2, $^)
 
-obj/%-summary.dat: analysis/%.py obj/%.dat | obj
-	python $< $(word 2, $^) > $@
-
-obj/%.dat: bin/% | obj
-	$< > $@
+obj/%-summary.dat: analysis/%.py bin/% | obj
+	python $< > $@
 
 # -----------------------------------------------------------------------------
 # Utils

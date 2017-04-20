@@ -10,18 +10,19 @@ struct GMM* fit(
 	const double* X, 
 	const size_t numPoints, 
 	const size_t pointDim, 
-	const size_t numComponents
+	const size_t numComponents,
+	const size_t maxIterations
 ) {
 	assert(X != NULL);
 	assert(numPoints > 0);
 	assert(pointDim > 0);
 	assert(numComponents > 0);
+	assert(maxIterations > 0);
 	
 	struct GMM* gmm = initGMM(X, numPoints, pointDim, numComponents);
 
 	const double tolerance = 1e-8;
 	size_t iteration = 0;
-	size_t maxIterations = 100;
 	double prevLogL = -INFINITY;
 	double currentLogL = -INFINITY;
 
@@ -66,7 +67,6 @@ struct GMM* fit(
 		);
 
 		assert(maxIterations > 0);
-		--maxIterations;
 		if(!shouldContinue(prevLogL, currentLogL, tolerance)) {
 			break;
 		}

@@ -189,7 +189,8 @@ extern "C" void gpuGmmFit(
 	double* Mu,
 	double* Sigma,
 	double* SigmaL,
-	double* normalizers
+	double* normalizers,
+	const size_t maxIterations
 ) {
 	assert(X != NULL);
 	assert(numPoints > 0);
@@ -201,6 +202,8 @@ extern "C" void gpuGmmFit(
 	assert(Sigma != NULL);
 	assert(SigmaL != NULL);
 	assert(normalizers != NULL);
+
+	assert(maxIterations >= 1);
 
 	int deviceId;
 
@@ -242,7 +245,6 @@ extern "C" void gpuGmmFit(
 	calcDim(numPoints, &deviceProp, &block, &grid);
 
 	size_t iteration = 0;
-	const size_t maxIterations = 100;
 	const double tolerance = 1e-8;
 
 	cudaStream_t streams[numComponents];

@@ -13,7 +13,8 @@ struct GMM* cudaFit(
 	const double* X, 
 	const size_t numPoints, 
 	const size_t pointDim, 
-	const size_t numComponents
+	const size_t numComponents,
+	const size_t maxIterations
 ) {
 	assert(X != NULL);
 	assert(numPoints > 0);
@@ -42,7 +43,8 @@ struct GMM* cudaFit(
 		X,
 		numPoints, pointDim, numComponents,
 		pi, Mu, Sigma,
-		SigmaL, normalizers
+		SigmaL, normalizers,
+		maxIterations
 	);
 
 	for(size_t k = 0; k < numComponents; ++k) {

@@ -116,15 +116,17 @@ struct GMM* parallelFit(
 	const double* X, 
 	const size_t numPoints, 
 	const size_t pointDim, 
-	const size_t numComponents
+	const size_t numComponents,
+	const size_t maxIterations
 ) {
 	assert(X != NULL);
 	assert(numPoints > 0);
 	assert(pointDim > 0);
 	assert(numComponents > 0);
+	assert(maxIterations > 0);
 
 	if(numComponents == 1) {
-		return fit(X, numPoints, pointDim, numComponents);
+		return fit(X, numPoints, pointDim, numComponents, maxIterations);
 	}
 
 	struct GMM* gmm = initGMM(X, numPoints, pointDim, numComponents);
@@ -145,7 +147,7 @@ struct GMM* parallelFit(
 	stsa.gmm = gmm;
 
 	stsa.tolerance = 1e-8;
-	stsa.maxIterations = 100;
+	stsa.maxIterations = maxIterations;
 	stsa.prevLogL = -INFINITY;
 	stsa.currentLogL = -INFINITY;
 	stsa.logpi = (double*)checkedCalloc(numComponents, sizeof(double));

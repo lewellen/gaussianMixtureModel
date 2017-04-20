@@ -16,6 +16,7 @@
 \usepackage{draftwatermark}
 \SetWatermarkText{\textsc{Draft}}
 \SetWatermarkScale{6}
+\usepackage{bytefield}
 
 \newgeometry{margin=1.25in}
 
@@ -45,7 +46,7 @@ Gaussian Mixture Models \cite[435-439]{bishop2006} offer a simple way to capture
 	p( x ) = \sum_{k = 1}^{K} \pi_{k} p(x \lvert \mu_k, \Sigma_k)
 \end{equation}
 
-Of practical interest is the learning of the number of components and the values of the parameters. Evaluation criteria, such as AIC or BIC, can be used to identify the number of components, or non-parametric models like Dirichlet processes can be used to avoid the matter all together. We won't cover these techniques here, but will instead focus on finding the values of the parameters given sufficient training data using the Expectation-Maximization algorithm \cite{dempster1977maximum}, and doing so efficiently on the GPU. Technical considerations will be discussed and the work will conclude with an empirical evaluation of sequential and parallel implementations for the CPU, and a massively parallel implementation for the GPU for varying numbers of components, points, and point dimensions.
+Of practical interest is the learning of the number of components and the values of the parameters. Evaluation criteria, such as Akaike and Bayesian, can be used to identify the number of components, or non-parametric models like Dirichlet processes can be used to avoid the matter all together. We won't cover these techniques here, but will instead focus on finding the values of the parameters given sufficient training data using the Expectation-Maximization algorithm \cite{dempster1977maximum}, and doing so efficiently on the GPU. Technical considerations will be discussed and the work will conclude with an empirical evaluation of sequential and parallel implementations for the CPU, and a massively parallel implementation for the GPU for varying numbers of components, points, and point dimensions.
 
 \section{Multivariate Gaussian Distribution}
 
@@ -66,7 +67,7 @@ To avoid numerical issues such as overflow and underflow, we're going to conside
 
 \section{Expectation Maximization}
 
-From an unsupervised learning point of view, GMMs can be seen as a generalization of k-means allowing for partial assignment of points to multiple classes. A possible classifier is given by $k^{*} = \arg\max_k \, \log \pi_{k} + \log p(x \lvert \mu_k, \Sigma_k)$. Alternatively, multiple components can be used to represent a single class and we argmax over the corresponding subset sums. The Expectation-Maximization (EM) algorithm will be used to find the parameters of of the model by incrementally computing probabilities given a fixed set of parameters, then updating those parameters by maximizing the log-likelihood of the data:
+From an unsupervised learning point of view, GMMs can be seen as a generalization of k-means allowing for partial assignment of points to multiple classes. A possible classifier is given by $k^{*} = \arg\max_k \, \log \pi_{k} + \log p(x \lvert \mu_k, \Sigma_k)$. Alternatively, multiple components can be used to represent a single class and we argmax over the corresponding subset sums. The utility of of GMMs goes beyond classification, and can be used for regression as well. The Expectation-Maximization (EM) algorithm will be used to find the parameters of of the model by incrementally computing probabilities given a fixed set of parameters, then updating those parameters by maximizing the log-likelihood of the data:
 
 \begin{equation}
 	\mathcal{L} \left( \mathcal{D} \lvert \mu, \Sigma \right) = \sum_{n = 1}^{N} \log p(x_n) = \sum_{n=1}^{N} \log{ \left [ \sum_{k = 1}^{K} \pi_{k} p \left( x_n \lvert \mu_k, \Sigma_k \right ) \right ] }
@@ -117,32 +118,54 @@ The algorithm continues back and forth between expectation and maximization stag
 
 \paragraph{Sequential} Per iteration complexity given by $\boundedBy{2 K N d^2 + K N d + 2K + N + K d^3}$. We expect $d \le K < N$ because too many dimensions leads to a lot of dead space and too many components results in overfitting of the data. Thus, the dominating term for sequential execution is given by $\boundedBy{ 2 K N d^2 }$. 
 
-\paragraph{Parallel}
+\paragraph{Parallel} Target hardware is a There are two natural data parallelisms that appear in the algorithm. The calculation of the $\mathcal{L}$ and $\gamma$ across points, while the probabilitiy densities and parameter updates have natural parallelisms across components. Each POSIX thread runs the full iterative algorithm with individual stages coordinated by barrier synchronization. Resulting complexity is given by $\mathcal{O}\left(\frac{2}{P} d^2 K N \right)$ for work coordinated across $P$ processors.
 
-\paragraph{Massively Parallel}
+\paragraph{Massively Parallel} The parallel implementation can be taken and mapped over to the GPU with parallelism taken across points and components depending on the terms being computed. There are several types of parallelism that we will leverage under the CUDA programming model. For the calculation of $\log p\left(x | \mu_k, \Sigma_k \right)$ we compute each point in parallel by forming a grid of one dimensional blocks, and use streams with event synchronization to carry out each component in parallel across the streaming multiprocessors. Calculation of the loglikelihood and $\log \gamma_{n,k}$ is done by computing and storing $\log p(x)$, then updating the storage for $\log p\left(x|\mu_k,\Sigma_k\right)$, and then performing a parallel reduction over $\log p(x)$ to produce the loglikelihood. Parallel reductions are a core tasks are implemented by first standardizing the input array of points to an supremium power of two, then reducing each block using shared memory, and applying a linear map to the memory so that successive block reductions can be applied. Several additional approaches are discussed in \cite{harris2007optimizing}. Once the loglikelihood is computed, the result is copied from the device back to the host. To compute $\log \Gamma_k$ is copied $\log \gamma_{n,k}$ to a working memory and a maximum parallel reduction is performed. The resulting maximum is used in a separate exponential map for numerical stability when computing the parallel reduction of each component to yield $\log \Gamma_k$. Updates to the mean and covariances are performed by mapping each term to a working memory allocated for each component's stream and executing a parallel reduction to yield the updated mean and covariance. Once all component streams have been synchronized, the mixture coefficients and cholesky decompositions of the covariances is computed with a single kernel invocation parallel in the number of components.
+
+The main design consideration was whether or not use streams. For larger numbers of components, this will result in improve runtime performance, however, it comes at the cost of increased memory usage which limits the size of problems an end user can study with the implementation. Because the primary design goal is performance, the increase in memory was favorable to using less memory and executing each component sequentially.
+
+To optimize the runtime of the implementation \texttt{nvprof} along with the NVIDIA Visual Profiler was used to identify performance bottlenecks. The original implementation was a naive port of the parallel C code which required frequent memory transfers between host and device resulting in signifigant CUDA API overhead that dominated the runtime. By transfering and allocating memory on the device beforehand, this allowed the implementation to execute primarily on the GPU and eliminate the API overhead. The second primary optimization was using streams and events for parallelization of the component probability densities and parameter updates in the maximization step. In doing so, this allowed for a $K$ fold reduction since the components calculations would be performed in parallel. The final optimization step was to streamline the parallel reductions by using block reductions against fast shared memory minimizing the number of global memory writes instead of performing iterated reductions against sequential addresing that preformed global memory reads and writes for each point.
+
+Discuss numeric issues cite \cite{collange2015numerical} and/or \cite{whitehead2011precision} for details.
+
+TODO: MORE DETAILS, NUMBERS!
 
 \section{Evaluation}
 
 To evaluate the implementations we need a way of generating GMMs and sampling data from the resulting distributions. To sample from a standard univariate normal distribution one can use The Box-Muller transform, Zigguart method, or Ratio-of-uniforms method \cite{kinderman1977computer}. The latter is used here due to its simplicity and efficiency. Sampling from the multivariate normal distribution can by done by sampling a standard normal vector $\eta \sim \mathcal{N}(0 ,I_d)$ and computing $\mu + \Sigma^{1/2} \eta$ where $\Sigma^{1/2}$ can be computed by Eigendecomposition, $\Sigma^{1/2} = Q \Delta^{1/2} Q^{-}$, or Cholesky facotrization, $\Sigma = L L^T, \Sigma^{1/2} = L$. The latter is used since it is more efficient. The GMM describes a generative process whereby we pick a component at random with probability given by its mixture coefficient and then sample the underlying $\mathcal{N}(\mu_k, \Sigma_k)$ distribution, and perform this process for the desired number of points.
 
-The matter of generating GMMs it more interesting. Here we draw $\pi_i = X_i / \sum_{j} X_j$ for $X_i \sim \mathcal{U}(0, 1)$, alternatively, one could draw $\pi \sim \text{Dir}(\alpha)$. Means are drawn by $\mu \sim \mathcal{N}(0, a I_d)$ with $a > 1$ so that means are relatively spread out in $\mathbb{R}^{d}$. The more exciting and interesting prospect is how to sample the covariance matrix. This is where the Wishart distribution, $\Sigma \sim W(I_d, d, n)$ for $n > d - 1$, comes in handy. The Wishart distribution is a model of what the sample covariance matrix should look like given a series of $n$ $x_i \sim \mathcal{N}(0, I_d)$ vectors. Based on a $\boundedBy{d^2}$ method by \cite{odell1966numerical}, \cite{sawyer2007wishart} gives an equally efficient method for sampling $\Sigma^{1/2} = L$ by letting $L_{i,i} \sim \chi^2(n - i)$ and $L_{i,j} \sim \mathcal{N}(0, 1)$ for $0 \le i < d$ and $0 \le j < i$. 
+The matter of generating GMMs it more interesting. Here we draw $\pi_i = X_i / \sum_{j} X_j$ for $X_i \sim \mathcal{U}(0, 1)$, alternatively, one could draw $\pi \sim \text{Dir}(\alpha)$. Means are drawn by $\mu \sim \mathcal{N}(0, a I_d)$ with $a > 1$ so that means are relatively spread out in $\mathbb{R}^{d}$. The more exciting prospect is how to sample the covariance matrix. This is where the Wishart distribution, $\Sigma \sim W(I_d, d, n)$ for $n > d - 1$, comes in handy. The Wishart distribution is a model of what the sample covariance matrix should look like given a series of $n$ $x_i \sim \mathcal{N}(0, I_d)$ vectors. Based on a $\boundedBy{d^2}$ method by \cite{odell1966numerical}, \cite{sawyer2007wishart} gives an equally efficient method for sampling $\Sigma^{1/2} = L$ by letting $L_{i,i} \sim \chi^2(n - i)$ and $L_{i,j} \sim \mathcal{N}(0, 1)$ for $0 \le i < d$ and $0 \le j < i$. 
 
-Three graphs represent sequential, parallel, and gpu:
+To evaluate the performance of the different implementations, the wall clock time taken for a single iteration consisting of memory allocation, processing, and deallocation was measured by varying each of the $N$, $K$, and $d$ parameters while holding the other two fixed. From an end user perspective wall clock time is preferable to the time the operating system actually devoted to the problem since wall clock time is more valuable. A single iteration is considered because different problem instances require different number of iterations for the log likelihood to converge. Tests were conducted on a Xeon 1245 v5 3.5 Ghz system with 32GB of memory and NVIDIA GTX 1060 6GB graphics card with 1280 cores.
 
-\begin{enumerate}
-	\item Fix $d, k$, vary $N$
-	\item Fix $d, N$, vary $k$
-	\item Fix $k, N$, vary $d$
-\end{enumerate}
+\begin{multicols}{2}
+\begin{figure}[H]
+	\centering
+	\resizebox{\linewidth}{!}{\input{obj/timeNumPoints.tex}}
+	\caption{Elapsed wall time with 95\% confidence interval for $K = $ and $d = $ across 30 samples.}
+	\label{fig:timeNumPoints}
+\end{figure}
 
-Two graphs
+\begin{figure}[H]
+	\centering
+	\resizebox{\linewidth}{!}{\input{obj/timeNumComponents.tex}}
+	\caption{Elapsed wall time with 95\% confidence interval for $N = $ and $d = $ across 30 smaples.}
+	\label{fig:timeNumComponents}
+\end{figure}
 
-\begin{enumerate}
-	\item Fix $d, k, N$ vary number of threads
-	\item Fix $d, k, n$ vary number of streaming multiprocessors (need to think that one over)
-\end{enumerate}
+\columnbreak
 
-Each graph should have about 10-15 samples per data point; each graph should include error bars after rejecting outliers. Times should be measured in seconds. Need to decide on commenting on gpu 32-bit single precision (for cheapo GPUs) and 64-bit double precision values on CPU.
+\begin{figure}[H]
+	\centering
+	\resizebox{\linewidth}{!}{\input{obj/timePointDim.tex}}
+	\caption{Elapsed wall time with 95\% confidence interval for $N = $ and $K = $ across 30 samples.}
+	\label{fig:timePointDim}
+\end{figure}
+\end{multicols}
+
+\section{Application}
+
+TODO
 
 \section{Conclusion}
 

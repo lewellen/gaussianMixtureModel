@@ -14,7 +14,8 @@ extern void gpuGmmFit(
 	double* Mu,
 	double* Sigma,
 	double* SigmaL,
-	double* normalizers
+	double* normalizers,
+	const size_t maxIterations
 );
 
 // Wrappers for unit testing

@@ -21,23 +21,25 @@ int main(int argc, char** argv) {
 
 	struct timeval start, end;
 
+	const size_t maxIterations = 1;
+
 	fprintf(stdout, "#numPoints numComponents pointDim seqElapsedSec parallelElapsedSec cudaElapsedSec\n");
 	for(size_t numPoints = minNumPoints; numPoints < maxNumPoints; numPoints *= 2) {
 		for(size_t sample = 0; sample < numSamples; ++sample) {	
 			double* X = generateGmmData(numPoints, pointDim, numComponents);
 
 			gettimeofday(&start, NULL);
-			freeGMM(fit(X, numPoints, pointDim, numComponents));
+			freeGMM(fit(X, numPoints, pointDim, numComponents, maxIterations));
 			gettimeofday(&end, NULL);
 			double seqElapsedSec = calcElapsedSec(&start, &end);
 
 			gettimeofday(&start, NULL);
-			freeGMM(parallelFit(X, numPoints, pointDim, numComponents));
+			freeGMM(parallelFit(X, numPoints, pointDim, numComponents, maxIterations));
 			gettimeofday(&end, NULL);
 			double parallelElapsedSec = calcElapsedSec(&start, &end);
 
 			gettimeofday(&start, NULL);
-			freeGMM(cudaFit(X, numPoints, pointDim, numComponents));
+			freeGMM(cudaFit(X, numPoints, pointDim, numComponents, maxIterations));
 			gettimeofday(&end, NULL);
 			double gpuElapsedSec = calcElapsedSec(&start, &end);
 

@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "datFile.h"
 #include "gmm.h"
@@ -38,7 +39,9 @@ int main(int argc, char** argv) {
 		return EXIT_FAILURE;
 	}
 
-	struct GMM* gmm = cudaFit(data, numPoints, pointDim, numComponents);
+	srand(time(NULL));
+
+	struct GMM* gmm = cudaFit(data, numPoints, pointDim, numComponents, 100);
 
 	fprintf(stdout, "numPoints: %zu, pointDim: %zu\n", numPoints, pointDim);
 	fprintf(stdout, "numComponents: %zu\n", numComponents);

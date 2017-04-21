@@ -194,3 +194,37 @@ void vectorAdd(
 		c[i] = a[i] + b[i];
 	}
 }
+
+void vecAddInplace(double* a, const double* b, const size_t D) {
+	assert(a != NULL);
+	assert(b != NULL);
+	assert(D > 0);
+
+	for(size_t d = 0; d < D; ++d) {
+		a[d] += b[d];
+	}
+}
+
+void vecDivByScalar(double* a, const double b, const size_t D) {
+	assert(a != NULL);
+	assert(fabs(b) > DBL_EPSILON);
+	assert(D > 0);
+
+	for(size_t d = 0; d < D; ++d) {
+		a[d] /= b;
+	}
+}
+
+double vecDiffNorm(const double* a, const double* b, const size_t D) {
+	assert(a != NULL);
+	assert(b != NULL);
+	assert(D > 0);
+
+	double dist = 0;
+	for(size_t d = 0; d < D; ++d) {
+		double distD = a[d] - b[d];
+		distD *= distD;
+		dist += distD;
+	}
+	return sqrt(dist);
+}

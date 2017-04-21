@@ -12,7 +12,7 @@ int main(int argc, char** argv) {
 	srand(time(NULL));
 
 	const size_t minNumComponents = 1;
-	const size_t maxNumComponents = 256;
+	const size_t maxNumComponents = 64;
 
 	const size_t numPoints = 512 * 1024;
 	const size_t pointDim = 2;
@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
 
 	struct timeval start, end;
 
-	const size_t maxIterations = 5;
+	const size_t maxIterations = 20;
 
 	fprintf(stdout, "#numPoints numComponents pointDim seqElapsedSec parallelElapsedSec cudaElapsedSec\n");
 	for(size_t sample = 0; sample < numSamples; ++sample) {	

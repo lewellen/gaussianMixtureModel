@@ -28,4 +28,22 @@ void vectorAdd(
 	const size_t n
 ); 
 
+void vecAddInPlace(
+	double* a, 
+	const double* b, 
+	const size_t D
+);
+
+void vecDivByScalar(
+	double* a, 
+	const double b, 
+	const size_t D
+);
+
+double vecDiffNorm(
+	const double* a, 
+	const double* b, 
+	const size_t D
+);
+
 #endif

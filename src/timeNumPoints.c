@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
 
 	struct timeval start, end;
 
-	const size_t maxIterations = 5;
+	const size_t maxIterations = 20;
 
 	fprintf(stdout, "#numPoints numComponents pointDim seqElapsedSec parallelElapsedSec cudaElapsedSec\n");
 	for(size_t numPoints = minNumPoints; numPoints <= maxNumPoints; numPoints *= 2) {

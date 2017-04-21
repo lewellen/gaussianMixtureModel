@@ -6,6 +6,7 @@
 
 #include "component.h"
 #include "gmm.h"
+#include "kmeans.h"
 #include "linearAlgebra.h"
 #include "util.h"
 
@@ -27,6 +28,18 @@ struct GMM* initGMM(
 	gmm->numComponents = numComponents;
 	gmm->components = (struct Component*) checkedCalloc(numComponents, sizeof(struct Component));
 
+	// Seed with kmeans (seeding with random points can lead to degeneracy)
+	double M[pointDim * numComponents];
+	for(size_t k = 0; k < numComponents; ++k) {
+		// Use a random point for mean of each component
+		size_t j = rand() % numPoints;
+		for(size_t dim = 0; dim < gmm->pointDim; dim++) {
+			M[k * pointDim + dim] = X[j * gmm->pointDim + dim];
+		}
+	}
+
+	kmeans(X, numPoints, pointDim, M, numComponents);
+
 	double uniformTau = 1.0 / numComponents;
 	for(size_t k = 0; k < gmm->numComponents; ++k) {
 		struct Component* component = & gmm->components[k];
@@ -34,12 +47,8 @@ struct GMM* initGMM(
 		// Assume every component has uniform weight
 		component->pi = uniformTau;
 
-		// Use a random point for mean of each component
 		component->mu = (double*)checkedCalloc(pointDim, sizeof(double));
-		size_t j = rand() % numPoints;
-		for(size_t dim = 0; dim < gmm->pointDim; dim++) {
-			component->mu[dim] = X[j * gmm->pointDim + dim];
-		}
+		memcpy(component->mu, &M[k * pointDim], pointDim * sizeof(double));
 
 		// Use identity covariance- assume dimensions are independent
 		component->sigma = (double*)checkedCalloc(pointDim * pointDim, sizeof(double));
@@ -429,7 +438,17 @@ double* generateGmmData(
 		free(covL);
 	}
 
-	// TODO: shuffle
+	// fisher yates shuffle
+	for(size_t i = numPoints - 1; i > 0; --i) {
+		size_t j = rand() % i;
+		for(size_t d = 0; d < pointDim; ++d) {
+			double t = X[i * pointDim + d];
+			X[i * pointDim + d] = X[j * pointDim + d];
+			X[j * pointDim + d] = t;
+		}
+	}
+
+	// alternative to above is to sample k ~ pi each iteration.
 
 	return X;
 }

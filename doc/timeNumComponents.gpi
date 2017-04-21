@@ -1,8 +1,11 @@
 set xlabel 'Number of components, $K$'
 set ylabel 'Elapsed time (sec)'
 
-set logscale xy
-set format xy '$10^{%L}$'
+set logscale x 2
+set logscale y 10
+
+set format x '$2^{%L}$'
+set format y '$10^{%L}$'
 
 set key top left
 

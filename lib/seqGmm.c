@@ -66,7 +66,6 @@ struct GMM* fit(
 			& currentLogL
 		);
 
-		assert(maxIterations > 0);
 		if(!shouldContinue(prevLogL, currentLogL, tolerance)) {
 			break;
 		}

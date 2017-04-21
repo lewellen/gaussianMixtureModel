@@ -19,17 +19,28 @@ void printToConsole(const struct Component* component, const size_t pointDim) {
 		return;
 	}
 
-	fprintf(stdout, "pi: %.3f\n", component->pi);
+	fprintf(stdout, "{\n");
 
-	fprintf(stdout, "mu: ");
-	for (size_t dim = 0; dim < pointDim; ++dim)
-		fprintf(stdout, "%.3f ", component->mu[dim]);
+	fprintf(stdout, "\"pi\" : %.15f,\n", component->pi);
 
-	fprintf(stdout, "\nsigma: ");
-	for (size_t dim = 0; dim < pointDim * pointDim; ++dim)
-		fprintf(stdout, "%.3f ", component->sigma[dim]);
+	fprintf(stdout, "\"mu\" : [ ");
+	for (size_t dim = 0; dim < pointDim; ++dim) {
+		fprintf(stdout, "%.15f ", component->mu[dim]);
+		if(dim + 1 < pointDim) {
+			fprintf(stdout, ", ");
+		}
+	}
+	fprintf(stdout, "],\n");
 
-	fprintf(stdout, "\n");
+	fprintf(stdout, "\"sigma\" : [ ");
+	for (size_t dim = 0; dim < pointDim * pointDim; ++dim) {
+		fprintf(stdout, "%.15f ", component->sigma[dim]);
+		if(dim + 1 < pointDim * pointDim) {
+			fprintf(stdout, ", ");
+		}
+	}
+	fprintf(stdout, "]\n");
+	fprintf(stdout, "}");
 }
 
 void prepareCovariance(struct Component* component, const size_t pointDim) {

@@ -39,10 +39,10 @@ int main(int argc, char** argv) {
 	double* X = generateGmmData(numPoints, pointDim, numComponents);
 
 	for(size_t i = 0; i < numPoints; ++i) {
-		for(size_t j = 0; j < pointDim; ++j) {
+		for(size_t j = 0; j < pointDim - 1; ++j) {
 			fprintf(stdout, "%f\t", X[i * pointDim + j]);
 		}
-		fprintf(stdout, "\n");
+		fprintf(stdout, "%f\n", X[i * pointDim + (pointDim - 1)]);
 	}
 
 	free(X);

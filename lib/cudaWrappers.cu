@@ -303,6 +303,7 @@ extern "C" void gpuGmmFit(
 			cudaStreamSynchronize(streams[k]);
 		}
 
+		
 		if(fabs(currentLogL - previousLogL) < tolerance || currentLogL < previousLogL) {
 			break;
 		}

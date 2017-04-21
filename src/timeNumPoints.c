@@ -12,7 +12,7 @@ int main(int argc, char** argv) {
 	srand(time(NULL));
 
 	const size_t minNumPoints = 128;
-	const size_t maxNumPoints = 262144;
+	const size_t maxNumPoints = 512 * 1024;
 
 	const size_t numComponents = 8;
 	const size_t pointDim = 2;
@@ -21,10 +21,10 @@ int main(int argc, char** argv) {
 
 	struct timeval start, end;
 
-	const size_t maxIterations = 1;
+	const size_t maxIterations = 5;
 
 	fprintf(stdout, "#numPoints numComponents pointDim seqElapsedSec parallelElapsedSec cudaElapsedSec\n");
-	for(size_t numPoints = minNumPoints; numPoints < maxNumPoints; numPoints *= 2) {
+	for(size_t numPoints = minNumPoints; numPoints <= maxNumPoints; numPoints *= 2) {
 		for(size_t sample = 0; sample < numSamples; ++sample) {	
 			double* X = generateGmmData(numPoints, pointDim, numComponents);
 

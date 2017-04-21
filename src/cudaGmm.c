@@ -15,6 +15,7 @@ void usage(const char* programName) {
 }
 
 int main(int argc, char** argv) {
+
 	if(argc != 3) {
 		usage(argv[0]);
 		return EXIT_FAILURE;
@@ -39,20 +40,22 @@ int main(int argc, char** argv) {
 		return EXIT_FAILURE;
 	}
 
-	srand(time(NULL));
+	struct timeval start, stop;
+	gettimeofday(&start, NULL);
 
 	struct GMM* gmm = cudaFit(data, numPoints, pointDim, numComponents, 100);
 
-	fprintf(stdout, "numPoints: %zu, pointDim: %zu\n", numPoints, pointDim);
-	fprintf(stdout, "numComponents: %zu\n", numComponents);
-	for (size_t k = 0; k < gmm->numComponents; ++k) {
-		fprintf(stdout, "Mixture %zu:\n", k);
-		printToConsole(& gmm->components[k], gmm->pointDim);
-	}
+	gettimeofday(&stop, NULL);
+	double elapsedSec = calcElapsedSec(&start, &stop);
+
+	fprintf(stdout, "{\n");
+	fprintf(stdout, "\"file\": \"%s\",\n", argv[1]);
+	fprintf(stdout, "\"elapsedSec\": %.6f,\n", elapsedSec);
+	fprintf(stdout, "\"model\": ");
+	printGmmToConsole(gmm);
+	fprintf(stdout, "}\n");
 
 	freeGMM(gmm);
-
 	free(data);
-
 	return EXIT_SUCCESS;
 }

@@ -39,7 +39,7 @@ def gatherData(primaryKey, execPath, desiredRuns):
 	return headings, results
 
 def printSummary(primaryKey, headings, results):
-	print("# %s " % primaryKey),
+	print("%s " % primaryKey),
 	for heading in headings:
 		print("%s CILB CIUB " % heading),
 	print("")
@@ -54,6 +54,6 @@ def printSummary(primaryKey, headings, results):
 
 			sampleMean = numpy.mean(xs)
 			sampleStd = numpy.std(xs)
-			confInt = stats.norm.interval(0.95, sampleMean, sampleStd)
+			confInt = stats.t.interval(0.95, len(xs), sampleMean, sampleStd)
 			print("%f %f %f" % (sampleMean, max(0, confInt[0]), max(0, confInt[1]))),
 		print("")

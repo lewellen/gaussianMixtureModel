@@ -78,4 +78,8 @@ double* generateGmmData(
 	const size_t numPoints, const size_t pointDim, const size_t numComponents
 );
 
+void printGmmToConsole(
+	struct GMM* gmm
+);
+
 #endif

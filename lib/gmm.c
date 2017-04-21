@@ -1,10 +1,10 @@
 #include <assert.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <stdio.h>
-
+#include "component.h"
 #include "gmm.h"
 #include "linearAlgebra.h"
 #include "util.h"
@@ -407,11 +407,11 @@ double* generateGmmData(
 	for(size_t k = 0; k < numComponents && xi < numPoints; ++k) {
 		// Select component mean
 		for(size_t i = 0; i < pointDim; ++i) {
-			mean[i] = 20 * sampleStandardNormal();
+			mean[i] = numComponents * sampleStandardNormal();
 		}
 
 		// Select component covariance (dof is just a heuristic)
-		const size_t dof = pointDim + 1 + (size_t) sqrt(0.25 * numPoints);
+		const size_t dof = pointDim + 1 + numComponents;
 		double* covL = sampleWishartCholesky(pointDim, dof);
 
 		// Sample points from component proportional to component mixture coefficient
@@ -432,4 +432,21 @@ double* generateGmmData(
 	// TODO: shuffle
 
 	return X;
+}
+
+void printGmmToConsole(struct GMM* gmm) { 
+	assert(gmm != NULL);
+
+	fprintf(stdout, "{\n");
+	fprintf(stdout, "\"pointDim\" : %zu,\n", gmm->pointDim);
+	fprintf(stdout, "\"numComponents\" : %zu,\n", gmm->numComponents);
+	fprintf(stdout, "\"mixtures\" : [\n");
+	for (size_t k = 0; k < gmm->numComponents; ++k) {
+		printToConsole(& gmm->components[k], gmm->pointDim);
+		if(k + 1 != gmm->numComponents) { 
+			fprintf(stdout, ", ");
+		}
+	}
+	fprintf(stdout, "]\n");
+	fprintf(stdout, "}\n");
 }

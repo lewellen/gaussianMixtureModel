@@ -11,17 +11,17 @@
 int main(int argc, char** argv) {
 	srand(time(NULL));
 
-	const size_t minPointDim = 1;
-	const size_t maxPointDim = 64;
+	const size_t minPointDim = 8;
+	const size_t maxPointDim = 128;
 
-	const size_t numPoints = 4096;
+	const size_t numPoints = 4 * 1024;
 	const size_t numComponents = 8;
 
 	const size_t numSamples = 1;
 
 	struct timeval start, end;
 
-	const size_t maxIterations = 1;
+	const size_t maxIterations = 5;
 
 	fprintf(stdout, "#numPoints numComponents pointDim seqElapsedSec parallelElapsedSec cudaElapsedSec\n");
 	for(size_t sample = 0; sample < numSamples; ++sample) {	
@@ -29,12 +29,12 @@ int main(int argc, char** argv) {
 			double* X = generateGmmData(numPoints, pointDim, numComponents);
 
 			gettimeofday(&start, NULL);
-			freeGMM(fit(X, numPoints, pointDim, numComponents, maxIterations));
+//			freeGMM(fit(X, numPoints, pointDim, numComponents, maxIterations));
 			gettimeofday(&end, NULL);
 			double seqElapsedSec = calcElapsedSec(&start, &end);
 
 			gettimeofday(&start, NULL);
-			freeGMM(parallelFit(X, numPoints, pointDim, numComponents, maxIterations));
+//			freeGMM(parallelFit(X, numPoints, pointDim, numComponents, maxIterations));
 			gettimeofday(&end, NULL);
 			double parallelElapsedSec = calcElapsedSec(&start, &end);
 

@@ -21,11 +21,11 @@ int main(int argc, char** argv) {
 
 	struct timeval start, end;
 
-	const size_t maxIterations = 1;
+	const size_t maxIterations = 5;
 
 	fprintf(stdout, "#numPoints numComponents pointDim seqElapsedSec parallelElapsedSec cudaElapsedSec\n");
 	for(size_t sample = 0; sample < numSamples; ++sample) {	
-		for(size_t numComponents = minNumComponents; numComponents < maxNumComponents; numComponents *= 2) {
+		for(size_t numComponents = minNumComponents; numComponents <= maxNumComponents; numComponents *= 2) {
 			double* X = generateGmmData(numPoints, pointDim, numComponents);
 
 			gettimeofday(&start, NULL);

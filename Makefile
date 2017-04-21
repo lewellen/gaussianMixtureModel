@@ -3,6 +3,7 @@ cLibObjs = $(patsubst lib/%.c, obj/c/%.o, $(wildcard lib/*.c))
 
 bins = $(patsubst src/%.c, bin/%, $(wildcard src/*.c))
 figs = $(patsubst doc/%.gpi, obj/%.tex, $(wildcard doc/*.gpi))
+cmprFigs = obj/n8192-d2-k32.png obj/n32768-d2-k64.png
 
 ccTool = gcc
 ccFlags = -O3 -Wall -std=iso9899:1999
@@ -34,11 +35,14 @@ clean:
 # Paper Targets
 # -----------------------------------------------------------------------------
 
-bin/document.pdf: doc/document.tex $(figs) | bin
+bin/document.pdf: doc/document.tex $(figs) $(cmprFigs) | bin
 	pdflatex --output-directory=bin doc/document.tex
 	bibtex bin/document.aux
 	pdflatex --output-directory=bin doc/document.tex
 	pdflatex --output-directory=bin doc/document.tex
+
+obj/%.png: res/%.dat analysis/compareVisualResults.py $(bins) | obj
+	python analysis/compareVisualResults.py $< $@
 
 obj/%.tex: obj/%-summary.dat doc/%.gpi | obj
 	gnuplot -e "argInput='$<'; argOutput='$@'" $(word 2, $^)

@@ -101,10 +101,6 @@ __host__ void cudaLogSumExp(
 	double* device_working, 
 	cudaStream_t stream
 ) {
-	cudaEvent_t a, b;
-	check(cudaEventCreateWithFlags(&a, cudaEventDisableTiming));
-	check(cudaEventCreateWithFlags(&b, cudaEventDisableTiming));
-
 	// dest <- src
 	check(cudaMemcpyAsync(
 		device_dest, device_src, 
@@ -112,8 +108,6 @@ __host__ void cudaLogSumExp(
 		cudaMemcpyDeviceToDevice,
 		stream
 	));
-
-	check(cudaEventRecord(b, stream));
 
 	// working <- src
 	check(cudaMemcpyAsync(
@@ -123,14 +117,8 @@ __host__ void cudaLogSumExp(
 		stream
 	));
 
-	check(cudaEventRecord(a, stream));
-
-	check(cudaStreamWaitEvent(stream, b, 0));
-
 	// working <- max { src }
 	cudaArrayMax(deviceProp, numPoints, device_working, stream);
-
-	check(cudaStreamWaitEvent(stream, a, 0));
 
 	// dest <- exp(src - max)
 	kernExp<<<grid, block, 0, stream>>>(
@@ -145,9 +133,6 @@ __host__ void cudaLogSumExp(
 	kernBiasAndLog<<<1, 1, 0, stream>>>(
 		device_dest, device_working
 	);
-
-	cudaEventDestroy(a);
-	cudaEventDestroy(b);
 }
 
 __global__ void kernCalcMu(

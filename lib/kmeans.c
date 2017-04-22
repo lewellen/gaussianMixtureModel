@@ -18,7 +18,6 @@ void kmeans(const double* X, const size_t numPoints, const size_t pointDim, doub
 	double diff = 0;
 
 	const size_t maxIterations = 20;
-	size_t iteration = 0;
 
 	double MP[numComponents * pointDim];
 	size_t counts[numComponents];

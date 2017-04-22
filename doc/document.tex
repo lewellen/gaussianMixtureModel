@@ -120,13 +120,13 @@ The algorithm continues back and forth between expectation and maximization stag
 
 \paragraph{Parallel} Target hardware is a There are two natural data parallelisms that appear in the algorithm. The calculation of the $\mathcal{L}$ and $\gamma$ across points, while the probabilitiy densities and parameter updates have natural parallelisms across components. Each POSIX thread runs the full iterative algorithm with individual stages coordinated by barrier synchronization. Resulting complexity is given by $\mathcal{O}\left(\frac{2}{P} d^2 K N \right)$ for work coordinated across $P$ processors.
 
-\paragraph{Massively Parallel} The parallel implementation can be taken and mapped over to the GPU with parallelism taken across points and components depending on the terms being computed. There are several types of parallelism that we will leverage under the CUDA programming model. For the calculation of $\log p\left(x | \mu_k, \Sigma_k \right)$ we compute each point in parallel by forming a grid of one dimensional blocks, and use streams with event synchronization to carry out each component in parallel across the streaming multiprocessors. Calculation of the loglikelihood and $\log \gamma_{n,k}$ is done by computing and storing $\log p(x)$, then updating the storage for $\log p\left(x|\mu_k,\Sigma_k\right)$, and then performing a parallel reduction over $\log p(x)$ to produce the loglikelihood. Parallel reductions are a core tasks are implemented by first standardizing the input array of points to an supremium power of two, then reducing each block using shared memory, and applying a linear map to the memory so that successive block reductions can be applied. Several additional approaches are discussed in \cite{harris2007optimizing}. Once the loglikelihood is computed, the result is copied from the device back to the host. To compute $\log \Gamma_k$ is copied $\log \gamma_{n,k}$ to a working memory and a maximum parallel reduction is performed. The resulting maximum is used in a separate exponential map for numerical stability when computing the parallel reduction of each component to yield $\log \Gamma_k$. Updates to the mean and covariances are performed by mapping each term to a working memory allocated for each component's stream and executing a parallel reduction to yield the updated mean and covariance. Once all component streams have been synchronized, the mixture coefficients and cholesky decompositions of the covariances is computed with a single kernel invocation parallel in the number of components.
+TODO: MP per iter complex; FLOW diagram
+
+\paragraph{Massively Parallel} The parallel implementation can be taken and mapped over to the GPU with parallelism taken across points and components depending on the terms being computed. There are several types of parallelism that we will leverage under the CUDA programming model. For the calculation of $\log p\left(x | \mu_k, \Sigma_k \right)$ we compute each point in parallel by forming a grid of one dimensional blocks, and use streams with event synchronization to carry out each component in parallel across the streaming multiprocessors. Calculation of the loglikelihood and $\log \gamma_{n,k}$ is done by computing and storing $\log p(x)$, then updating the storage for $\log p\left(x|\mu_k,\Sigma_k\right)$, and then performing a parallel reduction over $\log p(x)$ to produce the loglikelihood. Parallel reductions are a core tasks are implemented by first standardizing the input array of points to an supremium power of two, then reducing each block using shared memory, and applying a linear map to the memory so that successive block reductions can be applied. Several additional approaches are discussed in \cite{harris2007optimizing}. Once the loglikelihood is computed, the result is copied from the device back to the host. To compute $\log \Gamma_k$ is copied $\log \gamma_{n,k}$ to a working memory and a maximum parallel reduction is performed. The resulting maximum is used in a separate exponential map for numerical stability when computing the parallel reduction of each component to yield $\log \Gamma_k$. Updates to the mean and covariances are performed by mapping each term to a working memory allocated for each component's stream and executing a parallel reduction to yield the updated mean and covariance. Once all component streams have been synchronized, the mixture coefficients and Cholesky decompositions of the covariances is computed with a single kernel invocation parallel in the number of components.
 
 The main design consideration was whether or not use streams. For larger numbers of components, this will result in improve runtime performance, however, it comes at the cost of increased memory usage which limits the size of problems an end user can study with the implementation. Because the primary design goal is performance, the increase in memory was favorable to using less memory and executing each component sequentially.
 
-To optimize the runtime of the implementation \texttt{nvprof} along with the NVIDIA Visual Profiler was used to identify performance bottlenecks. The original implementation was a naive port of the parallel C code which required frequent memory transfers between host and device resulting in signifigant CUDA API overhead that dominated the runtime. By transfering and allocating memory on the device beforehand, this allowed the implementation to execute primarily on the GPU and eliminate the API overhead. The second primary optimization was using streams and events for parallelization of the component probability densities and parameter updates in the maximization step. In doing so, this allowed for a $K$ fold reduction since the components calculations would be performed in parallel. The final optimization step was to streamline the parallel reductions by using block reductions against fast shared memory minimizing the number of global memory writes instead of performing iterated reductions against sequential addresing that preformed global memory reads and writes for each point.
-
-Discuss numeric issues cite \cite{collange2015numerical} and/or \cite{whitehead2011precision} for details.
+To optimize the runtime of the implementation \texttt{nvprof} along with the NVIDIA Visual Profiler was used to identify performance bottlenecks. The original implementation was a naive port of the parallel C code which required frequent memory transfers between host and device resulting in signifigant CUDA API overhead that dominated the runtime. By transfering and allocating memory on the device beforehand, this allowed the implementation to execute primarily on the GPU and eliminate the API overhead. The second primary optimization was using streams and events for parallelization of the component probability densities and parameter updates in the maximization step. In doing so, this allowed for a $K$ fold reduction since the components calculations would be performed in parallel. The next optimization step was to streamline the parallel reductions by using block reductions against fast shared memory minimizing the number of global memory writes instead of performing iterated reductions against sequential addresing that preformed global memory reads and writes for each point. The final optimization step was to used pinned host memory to enable zero-copy transfers from DRAM to the GPU over DMA. 
 
 TODO: MORE DETAILS, NUMBERS!
 
@@ -137,35 +137,53 @@ To evaluate the implementations we need a way of generating GMMs and sampling da
 The matter of generating GMMs it more interesting. Here we draw $\pi_i = X_i / \sum_{j} X_j$ for $X_i \sim \mathcal{U}(0, 1)$, alternatively, one could draw $\pi \sim \text{Dir}(\alpha)$. Means are drawn by $\mu \sim \mathcal{N}(0, a I_d)$ with $a > 1$ so that means are relatively spread out in $\mathbb{R}^{d}$. The more exciting prospect is how to sample the covariance matrix. This is where the Wishart distribution, $\Sigma \sim W(I_d, d, n)$ for $n > d - 1$, comes in handy. The Wishart distribution is a model of what the sample covariance matrix should look like given a series of $n$ $x_i \sim \mathcal{N}(0, I_d)$ vectors. Based on a $\boundedBy{d^2}$ method by \cite{odell1966numerical}, \cite{sawyer2007wishart} gives an equally efficient method for sampling $\Sigma^{1/2} = L$ by letting $L_{i,i} \sim \chi^2(n - i)$ and $L_{i,j} \sim \mathcal{N}(0, 1)$ for $0 \le i < d$ and $0 \le j < i$. 
 
 To evaluate the performance of the different implementations, the wall clock time taken for a single iteration consisting of memory allocation, processing, and deallocation was measured by varying each of the $N$, $K$, and $d$ parameters while holding the other two fixed. From an end user perspective wall clock time is preferable to the time the operating system actually devoted to the problem since wall clock time is more valuable. A single iteration is considered because different problem instances require different number of iterations for the log likelihood to converge. Tests were conducted on a Xeon 1245 v5 3.5 Ghz system with 32GB of memory and NVIDIA GTX 1060 6GB graphics card with 1280 cores.
+\newpage
 
 \begin{multicols}{2}
 \begin{figure}[H]
 	\centering
 	\resizebox{\linewidth}{!}{\input{obj/timeNumPoints.tex}}
-	\caption{Elapsed wall time with 95\% confidence interval for $K = $ and $d = $ across 30 samples.}
+	\caption{Elapsed wall time with 95\% confidence interval for $K = 2^{3}$ and $d = 2^{1}$ across 5 samples.}
 	\label{fig:timeNumPoints}
 \end{figure}
 
 \begin{figure}[H]
 	\centering
-	\resizebox{\linewidth}{!}{\input{obj/timeNumComponents.tex}}
-	\caption{Elapsed wall time with 95\% confidence interval for $N = $ and $d = $ across 30 smaples.}
-	\label{fig:timeNumComponents}
+	\resizebox{\linewidth}{!}{\input{obj/timePointDim.tex}}
+	\caption{Elapsed wall time with 95\% confidence interval for $N = 2^{13}$ and $K = 2^{2}$ across 5 samples.}
+	\label{fig:timePointDim}
 \end{figure}
 
 \columnbreak
 
 \begin{figure}[H]
 	\centering
-	\resizebox{\linewidth}{!}{\input{obj/timePointDim.tex}}
-	\caption{Elapsed wall time with 95\% confidence interval for $N = $ and $K = $ across 30 samples.}
-	\label{fig:timePointDim}
+	\resizebox{\linewidth}{!}{\input{obj/timeNumComponents.tex}}
+	\caption{Elapsed wall time with 95\% confidence interval for $N = 2^{19} $ and $d = 2^{1}$ across 5 samples.}
+	\label{fig:timeNumComponents}
+\end{figure}
+
+\begin{figure}[H]
+	\centering
+	\resizebox{\linewidth}{!}{\includegraphics{obj/speedup.eps}}
+	\caption{Maximum speedup of parallel and CUDA approaches to sequential method observed across trials.}
+	\label{fig:sppedup}
 \end{figure}
 \end{multicols}
 
-\section{Application}
+Since the parameter space is relatively large Figures \ref{fig:timePointDim} - \ref{fig:timeNumComponents} look at varying one parameter will fixing the others to demonstrate the relative merits of each approach. When the number of points dominates the CUDA approach tends to be 18x faster; the Parallel approach tends to be 3x faster when the dimension is high; and CUDA is suitable when the num of components is high giving a 20x improvement relative to the sequential approach. Thus, when dealing with suitably large datasets, the CUDA based implemenation is preferrable delivering superior runtime performance without sacraficing quality.
 
-TODO
+It is important to note that the results obtained from the CUDA solution may differ to those the sequential and parallel approaches. This is due to nondeterministic round off errors associated with executing parallel reductions compared to sequential reductions \cite{collange2015numerical}, and differences in the handling of floating point values on the GPU \cite{whitehead2011precision}, notably, the presence of fused multiple add on NVIDIA GPUs which are more accurate than what is frequently implemented in CPU architectures. The following two synthetic data sets illustrate typical results of the three schemes:
+
+\begin{figure}[H]
+	\resizebox{\linewidth}{!}{\includegraphics{obj/n8192-d2-k32.png}}
+	\caption{Comparison of results against a synthetic data set with $N = 2^{13}, d = 2^{1}, K = 2^{5}$.}
+\end{figure}
+
+\begin{figure}[H]
+	\resizebox{\linewidth}{!}{\includegraphics{obj/n32768-d2-k64.png}}
+	\caption{Comparison of results against a synthetic data set with $N = 2^{15}, d = 2^{1}, K = 2^{6}$.}
+\end{figure}
 
 \section{Conclusion}
 

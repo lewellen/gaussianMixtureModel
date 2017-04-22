@@ -4,6 +4,7 @@ cLibObjs = $(patsubst lib/%.c, obj/c/%.o, $(wildcard lib/*.c))
 bins = $(patsubst src/%.c, bin/%, $(wildcard src/*.c))
 figs = $(patsubst doc/%.gpi, obj/%.tex, $(wildcard doc/*.gpi))
 cmprFigs = obj/n8192-d2-k32.png obj/n32768-d2-k64.png
+secondaryFigs = obj/speedup.eps
 
 ccTool = gcc
 ccFlags = -O3 -Wall -std=iso9899:1999
@@ -35,11 +36,14 @@ clean:
 # Paper Targets
 # -----------------------------------------------------------------------------
 
-bin/document.pdf: doc/document.tex $(figs) $(cmprFigs) | bin
+bin/document.pdf: doc/document.tex $(figs) $(secondaryFigs) $(cmprFigs) | bin
 	pdflatex --output-directory=bin doc/document.tex
 	bibtex bin/document.aux
 	pdflatex --output-directory=bin doc/document.tex
 	pdflatex --output-directory=bin doc/document.tex
+
+obj/%.eps: analysis/%.py $(figs) | obj
+	python $<
 
 obj/%.png: res/%.dat analysis/compareVisualResults.py $(bins) | obj
 	python analysis/compareVisualResults.py $< $@

@@ -2,7 +2,7 @@ from timeSummary import gatherData, printSummary
 
 if __name__ == "__main__":
 	execPath = "bin/timeNumComponents"
-	numSamples = 5
+	numSamples = 15
 
 	primaryKey = "numComponents"
 	columns = [ "seqElapsedSec", "parallelElapsedSec", "cudaElapsedSec" ]

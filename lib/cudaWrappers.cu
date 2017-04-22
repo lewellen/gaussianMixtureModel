@@ -120,8 +120,6 @@ extern "C" double gpuGmmLogLikelihood(
 	cudaDeviceProp deviceProp;
 	check(cudaGetDeviceProperties(&deviceProp, deviceId));
 
-	const size_t M = largestPowTwoLessThanEq(numPoints); 
-
 	double* device_logpi = sendToGpu(numComponents, logpi);
 	
 	// Sending all data because logP is an array organized by:
@@ -134,7 +132,6 @@ extern "C" double gpuGmmLogLikelihood(
 	double logL = cudaGmmLogLikelihoodAndGammaNK(
 		& deviceProp,
 		numPoints, numComponents,
-		M,
 		logpi, logP,
 		device_logpi, device_logP
 	);
@@ -216,25 +213,28 @@ extern "C" void gpuGmmFit(
 	// printf("multiProcessorCount: %d\n", deviceProp.multiProcessorCount);
 	// printf("concurrentKernels: %d\n", deviceProp.concurrentKernels);
 
-	double* device_X = sendToGpu(numPoints * pointDim, X);
+	double* device_X = pinHostAndSendDevice(numPoints * pointDim, (double*) X);
 
 	for(size_t i = 0; i < numComponents; ++i) {
 		assert(pi[i] > 0);
 		pi[i] = log(pi[i]);
 	}
 
-	double* device_logpi = sendToGpu(numComponents, pi);
-	double* device_Mu = sendToGpu(numComponents * pointDim, Mu);
-	double* device_Sigma = sendToGpu(numComponents * pointDim * pointDim, Sigma);
+	double* device_logpi = pinHostAndSendDevice(numComponents, pi);
+	double* device_Mu = pinHostAndSendDevice(numComponents * pointDim, Mu);
+	double* device_Sigma = pinHostAndSendDevice(numComponents * pointDim * pointDim, Sigma);
 
-	double* device_SigmaL = sendToGpu(numComponents * pointDim * pointDim, SigmaL);
-	double* device_normalizers = sendToGpu(numComponents, normalizers);
-
+	double* device_SigmaL = pinHostAndSendDevice(numComponents * pointDim * pointDim, SigmaL);
+	double* device_normalizers = pinHostAndSendDevice(numComponents, normalizers);
 
 	double* device_loggamma = mallocOnGpu(numPoints * numComponents);
 	double* device_logGamma = mallocOnGpu(numPoints * numComponents);	
 
-	double currentLogL = -INFINITY, previousLogL = -INFINITY;
+	double previousLogL = -INFINITY;
+
+	double* pinnedCurrentLogL;
+	cudaMallocHost(&pinnedCurrentLogL, sizeof(double));
+	*pinnedCurrentLogL = -INFINITY;
 
 	// logPx, mu, sigma reductions
 	// This means for mu and sigma can only do one component at a time otherwise 
@@ -281,16 +281,16 @@ extern "C" void gpuGmmFit(
 		// loggamma[k * numPoints + i] = p(x_i | mu_k, Sigma_k) / p(x_i)
 		// working[i] = p(x_i)
 		kernCalcLogLikelihoodAndGammaNK<<<grid, block, 0, streams[numComponents - 1]>>>(
-			numPoints, numPoints, numComponents,
+			numPoints, numComponents,
 			device_logpi, device_working, device_loggamma
 		);
 
 		// working[0] = sum_{i} p(x_i)
 		cudaArraySum(&deviceProp, numPoints, 1, device_working, streams[numComponents - 1]);
 
-		previousLogL = currentLogL;
+		previousLogL = *pinnedCurrentLogL;
 		check(cudaMemcpyAsync(
-			&currentLogL, device_working, 
+			pinnedCurrentLogL, device_working, 
 			sizeof(double), 
 			cudaMemcpyDeviceToHost,
 			streams[numComponents - 1]
@@ -302,9 +302,8 @@ extern "C" void gpuGmmFit(
 		for(size_t k = 0; k < numComponents; ++k) {
 			cudaStreamSynchronize(streams[k]);
 		}
-
 		
-		if(fabs(currentLogL - previousLogL) < tolerance || currentLogL < previousLogL) {
+		if(fabs(*pinnedCurrentLogL - previousLogL) < tolerance || *pinnedCurrentLogL < previousLogL) {
 			break;
 		}
 
@@ -422,29 +421,20 @@ extern "C" void gpuGmmFit(
 		cudaStreamDestroy(streams[k]);
 	}
 
+	cudaFreeHost(pinnedCurrentLogL);
 	cudaFree(device_working);
-
 	cudaFree(device_logGamma);
 	cudaFree(device_loggamma);
 
-	check(cudaMemcpy(normalizers, device_normalizers, numComponents * sizeof(double), cudaMemcpyDeviceToHost));
-	cudaFree(device_normalizers);
-
-	check(cudaMemcpy(SigmaL, device_SigmaL, numComponents * pointDim * pointDim * sizeof(double), cudaMemcpyDeviceToHost));
-	cudaFree(device_SigmaL);
-
-	check(cudaMemcpy(Sigma, device_Sigma, numComponents * pointDim * pointDim * sizeof(double), cudaMemcpyDeviceToHost));
-	cudaFree(device_Sigma);
-
-	check(cudaMemcpy(Mu, device_Mu, numComponents * pointDim * sizeof(double), cudaMemcpyDeviceToHost));
-	cudaFree(device_Mu);
-
-	check(cudaMemcpy(pi, device_logpi, numComponents * sizeof(double), cudaMemcpyDeviceToHost));
-	cudaFree(device_logpi);
+	recvDeviceUnpinHost(device_normalizers, normalizers, numComponents);
+	recvDeviceUnpinHost(device_SigmaL, SigmaL, numComponents * pointDim * pointDim);
+	recvDeviceUnpinHost(device_Sigma, Sigma, numComponents * pointDim * pointDim);
+	recvDeviceUnpinHost(device_Mu, Mu, numComponents * pointDim);
+	recvDeviceUnpinHost(device_logpi, pi, numComponents);
 
 	for(size_t i = 0; i < numComponents; ++i) {
 		pi[i] = exp(pi[i]);
 	}
 
-	cudaFree(device_X);
+	unpinHost(device_X, (double*) X);
 }

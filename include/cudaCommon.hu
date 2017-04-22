@@ -17,4 +17,10 @@ __host__ double* mallocOnGpu(const size_t N);
  
 __host__ double* sendToGpu(const size_t N, const double* A);
 
+__host__ double* pinHostAndSendDevice(const size_t N, double* host);
+
+__host__ void recvDeviceUnpinHost(double* device, double* host, const size_t N);
+
+__host__ void unpinHost(double* device, double* host); 
+
 #endif

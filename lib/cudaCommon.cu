@@ -83,11 +83,30 @@ __host__ double* mallocOnGpu(const size_t N) {
 	return device_A;
 }
 
-__host__ double* sendToGpu(const size_t N, const double* A) {
-	double* device_A;
-	const size_t ABytes = N * sizeof(double);
-	check(cudaMalloc(&device_A, ABytes));
-	check(cudaMemcpy(device_A, A, ABytes, cudaMemcpyHostToDevice));
-	return device_A;
+__host__ double* sendToGpu(const size_t N, const double* host) {
+	double* device;
+	const size_t hostBytes = N * sizeof(double);
+	check(cudaMalloc(&device, hostBytes));
+	check(cudaMemcpy(device, host, hostBytes, cudaMemcpyHostToDevice));
+	return device;
 }
 
+__host__ double* pinHostAndSendDevice(const size_t N, double* host) {
+	double* device;
+	const size_t hostBytes = N * sizeof(double);
+	check(cudaHostRegister(host, hostBytes, cudaHostRegisterDefault));
+	check(cudaMalloc(&device, hostBytes));
+	check(cudaMemcpy(device, host, hostBytes, cudaMemcpyHostToDevice));
+	return device;
+}
+
+__host__ void recvDeviceUnpinHost(double* device, double* host, const size_t N) {
+	check(cudaMemcpy(host, device, N * sizeof(double), cudaMemcpyDeviceToHost));
+	cudaFree(device);
+	cudaHostUnregister(host);
+}
+
+__host__ void unpinHost(double* device, double* host) {
+	cudaFree(device);
+	cudaHostUnregister(host);
+}

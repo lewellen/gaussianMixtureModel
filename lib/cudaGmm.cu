@@ -9,7 +9,7 @@
 #include "cudaGmm.hu"
 
 __global__ void kernCalcLogLikelihoodAndGammaNK(
-	const size_t M, const size_t numPoints, const size_t numComponents,
+	const size_t numPoints, const size_t numComponents,
 	const double* logpi, double* logPx, double* loggamma
 ) {
 	// loggamma[k * numPoints + i] = 
@@ -19,7 +19,7 @@ __global__ void kernCalcLogLikelihoodAndGammaNK(
 	// Assumes a 2D grid of 1024x1 1D blocks
 	int b = blockIdx.y * gridDim.x + blockIdx.x;
 	int i = b * blockDim.x + threadIdx.x;
-	if(i >= M) {
+	if(i >= numPoints) {
 		return;
 	}
 
@@ -50,29 +50,26 @@ __global__ void kernCalcLogLikelihoodAndGammaNK(
 __host__ double cudaGmmLogLikelihoodAndGammaNK(
 	cudaDeviceProp* deviceProp,
 	const size_t numPoints, const size_t numComponents,
-	const size_t M,
 	const double* logpi, double* logP,
 	const double* device_logpi, double* device_logP
 ) {
 	// logpi: 1 x numComponents
 	// logP: numComponents x numPoints
 
-	// Do the first M (2^n) points on the gpu; remainder on cpu
-
 	dim3 grid, block;
-	calcDim(M, deviceProp, &block, &grid);
+	calcDim(numPoints, deviceProp, &block, &grid);
 
 	double logL = 0;
-	double* device_logPx = mallocOnGpu(M);
+	double* device_logPx = mallocOnGpu(numPoints);
 
 	kernCalcLogLikelihoodAndGammaNK<<<grid, block>>>(
-		M, numPoints, numComponents,
+		numPoints, numComponents,
 		device_logpi, device_logPx, device_logP
 	);
 
 	cudaArraySum(
 		deviceProp, 
-		M, 1, 
+		numPoints, 1, 
 		device_logPx 
 	);
 
@@ -83,33 +80,6 @@ __host__ double cudaGmmLogLikelihoodAndGammaNK(
 	// Copy back the full numPoints * numComponents values
 	check(cudaMemcpy(logP, device_logP, 
 		numPoints * numComponents * sizeof(double), cudaMemcpyDeviceToHost));
-
-	if(M != numPoints) {
-		for (size_t point = M; point < numPoints; ++point) {
-			double maxArg = -INFINITY;
-			for(size_t k = 0; k < numComponents; ++k) {
-				const double logProbK = logpi[k] + logP[k * numPoints + point];
-				if(logProbK > maxArg) {
-					maxArg = logProbK;
-				}
-			}
-
-			double sum = 0.0;
-			for (size_t k = 0; k < numComponents; ++k) {
-				const double logProbK = logpi[k] + logP[k * numPoints + point];
-				sum += exp(logProbK - maxArg);
-			}
-
-			assert(sum >= 0);
-			const double logpx = maxArg + log(sum);
-
-			for(size_t k = 0; k < numComponents; ++k) {
-				logP[k * numPoints + point] += -logpx;
-			}
-
-			logL += logpx;
-		}
-	}
 
 	return logL;
 }

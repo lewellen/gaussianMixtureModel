@@ -4,14 +4,13 @@
 #include <stdlib.h>
 
 __global__ void kernCalcLogLikelihoodAndGammaNK(
-	const size_t M, const size_t numPoints, const size_t numComponents,
+	const size_t numPoints, const size_t numComponents,
 	const double* logpi, double* logPx, double* loggamma
 );
 
 __host__ double cudaGmmLogLikelihoodAndGammaNK(
 	cudaDeviceProp* deviceProp,
 	const size_t numPoints, const size_t numComponents,
-	const size_t M,
 	const double* logpi, double* logP,
 	const double* device_logpi, double* device_logP
 );
